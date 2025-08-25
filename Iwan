@@ -1,7 +1,4 @@
-// ===================================================================================
-// BAGIAN 1: KONFIGURASI UTAMA
-// ===================================================================================
-const SPREADSHEET_ID = "1tDc8cP528vGetgfp7451MnNuGL-2eK_SI4v2YIHe0jU"; // GANTI DENGAN ID SPREADSHEET ANDA
+const SPREADSHEET_ID = "1tDc8cP528vGetgfp7451MnNuGL-2eK_SI4v2YIHe0jU";  // Confirm ID Sheets Anda
 const SHEET_NAMES = {
   RESPONDEN: "RESPONDEN",
   LIST: "LIST"
@@ -19,2123 +16,756 @@ const COLUMNS = {
   STATUS_FINAL: 35, TANGGAL_SELESAI_FINAL: 36, STATUS_ADMIN4_ONTIME_LATE: 38,
   KETERANGAN_DITUNDA: 40
 };
+const USER_CREDENTIALS = [
+  { email: "AdminSP1", password: "#123", role: "Admin 1" },
+  { email: "AdminSP2A", password: "#1234", role: "Admin 2A" },
+  { email: "AdminSP2B", password: "#1235", role: "Admin 2B" },
+  { email: "AdminSP3", password: "#1236", role: "Admin 3" },
+  { email: "AdminSP4", password: "#1237", role: "Admin 4" },
+  { email: "Surveyor1", password: "#1238", role: "Surveyor" }
+];
 const TIME_ZONE = 'Asia/Jakarta';
 const scriptCache = CacheService.getScriptCache();
 
-function setupCredentials() {
-  const users = {
-    "AdminSP1": JSON.stringify({ password: "#123", role: "Admin 1" }),
-    "AdminSP2A": JSON.stringify({ password: "#1234", role: "Admin 2A" }),
-    "AdminSP2B": JSON.stringify({ password: "#1235", role: "Admin 2B" }),
-    "AdminSP3": JSON.stringify({ password: "#1236", role: "Admin 3" }),
-    "AdminSP4": JSON.stringify({ password: "#1237", role: "Admin 4" }),
-    "Surveyor1": JSON.stringify({ password: "#1238", role: "Surveyor" })
-  };
-  PropertiesService.getScriptProperties().setProperties(users, true);
-  Logger.log('Kredensial pengguna berhasil disimpan dengan aman.');
-}
-
-// ===================================================================================
-// BAGIAN 2: FUNGSI HELPER & EFISIENSI
-// ===================================================================================
 function getSheet(sheetName) { 
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID); 
-  return ss.getSheetByName(sheetName); 
+  try { 
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID); 
+    const sheet = ss.getSheetByName(sheetName); 
+    if (!sheet) throw new Error(`Sheet ${sheetName} tidak ditemukan.`); 
+    return sheet; 
+  } catch (e) { 
+    Logger.log(`Error getSheet: ${e.message}`); 
+    throw e; 
+  } 
 }
 
 function findRowByDocNumV2(sheet, docNum) { 
-  const range = sheet.getRange(2, COLUMNS.NOMOR_BERKAS, sheet.getLastRow() - 1, 1); 
-  const textFinder = range.createTextFinder(docNum.toString().trim()).matchEntireCell(true); 
-  const firstOccurrence = textFinder.findNext(); 
-  return firstOccurrence ? firstOccurrence.getRow() : null; 
+  try {
+    if (!sheet || !docNum || typeof docNum !== 'string') throw new Error("Sheet atau nomor dokumen tidak valid.");
+    const range = sheet.getRange(1, COLUMNS.NOMOR_BERKAS, sheet.getLastRow(), 1); 
+    const textFinder = range.createTextFinder(docNum.trim()).matchEntireCell(true); 
+    const firstOccurrence = textFinder.findNext(); 
+    return firstOccurrence ? firstOccurrence.getRow() : null; 
+  } catch (e) { 
+    Logger.log(`Error findRowByDocNumV2: ${e.message}`); 
+    throw e; 
+  } 
 }
 
 function setCellValue(range, value, isDate = false) { 
-  if (isDate && value) {
-    value = Utilities.formatDate(new Date(value), TIME_ZONE, 'dd/MM/yyyy');
-  }
-  range.setValue(value).setFontFamily('Arial').setFontSize(12); 
+  try { 
+    if (isDate && value instanceof Date) {
+      value = Utilities.formatDate(value, TIME_ZONE, 'dd/MM/yyyy');
+    }
+    range.setValue(value).setFontFamily('Arial').setFontSize(12); 
+  } catch (e) { 
+    Logger.log(`Error setCellValue: ${e.message}`); 
+    throw e; 
+  } 
 }
 
 function prepareWhatsAppData(noWa, pesan) { 
-  let phone = String(noWa || "").trim().replace(/\D/g, ""); 
-  if (!/^(62|0)8[0-9]{8,12}$/.test(phone)) return { success: false, error: "Nomor tidak terdaftar dalam WhatsApp." };
-  if (phone.startsWith("0")) phone = "62" + phone.substring(1);
-  const encodedMessage = encodeURIComponent(pesan); 
-  const url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodedMessage}`; 
-  return { success: true, url: url }; 
-}
-
-function parseDateFromForm(dateString) {
-  return dateString ? new Date(dateString) : null;
-}
-
-// ===================================================================================
-// BAGIAN 3: INTI APLIKASI WEB
-// ===================================================================================
-function doGet(e) { 
-  let pageName = e.parameter.page || 'Dashboard'; 
-  const role = e.parameter.role || 'Publik'; 
-  if (pageName !== 'Login' && pageName !== 'Dashboard' && role === 'Publik') { 
-    pageName = 'Login'; 
+  try { 
+    let phone = String(noWa || "").trim().replace(/\D/g, ""); 
+    if (!/^(62|0)8[0-9]{8,12}$/.test(phone)) return { success: false, error: "Nomor WhatsApp tidak valid." };
+    if (phone.startsWith("0")) phone = "62" + phone.substring(1);
+    const encodedMessage = encodeURIComponent(pesan); 
+    const url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodedMessage}`; 
+    return { success: true, url: url }; 
+  } catch (e) { 
+    Logger.log(`Error prepareWhatsAppData: ${e.message}`); 
+    return { success: false, error: "Terjadi kesalahan internal: " + e.message }; 
   } 
-  const template = HtmlService.createTemplateFromFile(pageName); 
-  template.baseUrl = ScriptApp.getService().getUrl(); 
-  template.userName = e.parameter.name || 'Tamu'; 
-  template.userRole = role; 
-  
-  if (pageName === 'Dashboard') { 
-    template.dashboardData = getDashboardData();
-  } else if (pageName === 'DashboardSurveyor') {
-    template.surveyorList = getSurveyorList();
-  } else if (['FormLanjutan', 'FormAdmin2A', 'FormAdmin2B', 'FormAdmin3', 'FormAdminFinalize'].includes(pageName)) { 
-    template.formOptions = getInitialFormOptions(); 
-  }
-  
-  return template.evaluate() 
-    .setTitle("Sistem Monitoring Berkas - BPN Kab. Serang") 
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL); 
-}
-
-function checkLogin(email, password) { 
-  const scriptProperties = PropertiesService.getScriptProperties();
-  const userDataString = scriptProperties.getProperty(email);
-  if (!userDataString) throw new Error("Username tidak ditemukan.");
-  const userData = JSON.parse(userDataString);
-  if (userData.password !== password) throw new Error("Password salah.");
-  return { status: "success", role: userData.role, name: email }; 
-}
-
-function logout() { 
-  return ScriptApp.getService().getUrl() + '?page=Dashboard';
-}
-
-// ===================================================================================
-// BAGIAN 4: PEMUATAN DATA AWAL (GETTERS)
-// ===================================================================================
-function getInitialFormOptions() { 
-  const cacheKey = 'initialFormOptions';
-  let cached = scriptCache.get(cacheKey);
-  if (cached) return JSON.parse(cached);
-
-  const listSheet = getSheet(SHEET_NAMES.LIST);
-  const respondenSheet = getSheet(SHEET_NAMES.RESPONDEN);
-  
-  const docNumbers = respondenSheet.getRange(2, COLUMNS.NOMOR_BERKAS, respondenSheet.getLastRow() - 1).getValues().flat().filter(String);
-  const surveyorList = listSheet.getRange("G2:G29").getValues().flat().filter(String);
-  const mappingOfficers = listSheet.getRange("L2:L6").getValues().flat().filter(String);
-  const statusAdmin2BList = [{ value: "Proses", label: "Berkas sedang dalam pengecekan QC" }];
-  const statusAdmin3List = listSheet.getRange("P2:P3").getValues().flat().filter(String).map(s => ({ value: s, label: s }));
-  const finalStatusList = listSheet.getRange("V2:V3").getValues().flat().filter(String).map(s => ({ value: s, label: s }));
-
-  // PERBAIKAN: Fallback jika docNumbers kosong
-  const options = { docNumbers: docNumbers.length > 0 ? docNumbers : ['Tidak ada data dokumen'], surveyorList, mappingOfficers, admin2B: { statusList: statusAdmin2BList }, admin3: { statusList: statusAdmin3List }, adminFinal: { finalStatusList } };
-  scriptCache.put(cacheKey, JSON.stringify(options), 3600);
-  return options;
-}
-
-function getSurveyorList() {
-  const cacheKey = 'surveyorList';
-  let cached = scriptCache.get(cacheKey);
-  if (cached) return JSON.parse(cached);
-
-  const respondenSheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const list = respondenSheet.getRange(2, COLUMNS.NAMA_SURVEYOR_PILIHAN, respondenSheet.getLastRow() - 1)
-    .getValues().flat().filter(String).filter((v, i, a) => a.indexOf(v) === i).sort();
-  scriptCache.put(cacheKey, JSON.stringify(list), 3600);
-  return list;
-}
-
-function getDataByDocumentNumber(docNumber) { 
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowNum = findRowByDocNumV2(sheet, docNumber);
-  if (!rowNum) return { surveyor: "", kontak: "", namaPemohon: "" };
-  
-  const values = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
-  return {
-    surveyor: values[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1] || "",
-    kontak: values[COLUMNS.KONTAK_PEMOHON - 1] || "",
-    namaPemohon: values[COLUMNS.NAMA_PEMOHON - 1] || ""
-  };
-}
-
-function getPemohonContact(docNum) { 
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowNum = findRowByDocNumV2(sheet, docNum);
-  if (!rowNum) return { found: false };
-  
-  const row = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
-  return {
-    found: true,
-    email: row[COLUMNS.EMAIL_PEMOHON_ADMIN3 - 1] || '',
-    nama: row[COLUMNS.NAMA_PEMOHON - 1] || 'Tidak Diketahui',
-    kontak: row[COLUMNS.KONTAK_PEMOHON - 1] || ''
-  };
 }
 
 function getSurveyorContact(surveyorName) { 
-  const listSheet = getSheet(SHEET_NAMES.LIST);
-  const dataRange = listSheet.getRange("G2:I29").getValues();
-  // PERBAIKAN: Case-insensitive search
-  const surveyor = dataRange.find(row => row[0] && row[0].trim().toLowerCase() === surveyorName.trim().toLowerCase());
-  return surveyor ? surveyor[2] : null;
+  try { 
+    if (!surveyorName || typeof surveyorName !== 'string') throw new Error("Nama surveyor tidak valid.");
+    const listSheet = getSheet(SHEET_NAMES.LIST); 
+    const surveyorRange = listSheet.getRange("G2:G29"); 
+    const contactRange = listSheet.getRange("I2:I29"); 
+    const names = surveyorRange.getValues().flat(); 
+    const contacts = contactRange.getValues().flat(); 
+    const index = names.findIndex(name => name && name.trim().toLowerCase() === surveyorName.trim().toLowerCase()); 
+    return index !== -1 ? contacts[index] : null; 
+  } catch (e) { 
+    Logger.log(`Error getSurveyorContact: ${e.message}`); 
+    throw e; 
+  } 
 }
 
-function getSurveyorEmail(surveyorName) {
-  const listSheet = getSheet(SHEET_NAMES.LIST);
-  const dataRange = listSheet.getRange("G2:H29").getValues();
-  // PERBAIKAN: Case-insensitive search
-  const surveyor = dataRange.find(row => row[0] && row[0].trim().toLowerCase() === surveyorName.trim().toLowerCase());
-  return surveyor ? surveyor[1] : null;
-}
-
-// ===================================================================================
-// BAGIAN 5: FUNGSI-FUNGSI ADMIN
-// ===================================================================================
-
-// --- ADMIN 1 ---
-function submitFollowUp(data) { 
-  const respondenSheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowToUpdate = findRowByDocNumV2(respondenSheet, data.documentNumber);
-  if (!rowToUpdate) throw new Error("Nomor dokumen tidak ditemukan.");
-  
-  const startDate = parseDateFromForm(data.startDate);
-  if (!startDate) throw new Error("Tanggal mulai tidak valid.");
-  
-  // PERBAIKAN: Pemrosesan batch dengan setValues
-  const batasWaktu = new Date(startDate.getTime() + 14 * 86400000);
-  const values = [[data.surveyor, data.kontakPemohon, Utilities.formatDate(startDate, TIME_ZONE, 'dd/MM/yyyy'), Utilities.formatDate(batasWaktu, TIME_ZONE, 'dd/MM/yyyy')]];
-  respondenSheet.getRange(rowToUpdate, COLUMNS.NAMA_SURVEYOR_PILIHAN, 1, 4).setValues(values);
-  
-  return "✅ Data berhasil disimpan.";
-}
-
-function sendNotificationToSurveyor(docNumber) { 
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowNum = findRowByDocNumV2(sheet, docNumber);
-  if (!rowNum) throw new Error("Nomor dokumen tidak ditemukan.");
-  
-  const rowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const surveyor = rowData[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1];
-  const contact = getSurveyorContact(surveyor);
-  if (!contact) throw new Error("Kontak surveyor tidak ditemukan.");
-  
-  const message = `Halo, Sobat Ukur ${surveyor}!\nAnda mendapat tugas untuk berkas ${docNumber}. Silakan ambil surat tugas di Seksi Pemetaan dan Survey, BPN Kab. Serang.\nTerima Kasih,\nAdmin 1`;
-  const waData = prepareWhatsAppData(contact, message);
-  
-  if (waData.success) {
-    return { success: true, action: "open_whatsapp", url: waData.url, message: "✅ Notifikasi ke surveyor berhasil disiapkan." };
-  }
-  throw new Error(waData.error);
-}
-
-function sendNotificationToApplicant(docNumber) { 
-  const pemohonData = getPemohonContact(docNumber);
-  if (!pemohonData.found || !pemohonData.kontak) throw new Error("Kontak pemohon tidak ditemukan/valid.");
-  
-  const message = `Yth. Bapak/Ibu ${pemohonData.nama},\n\nBerkas Anda (No. *${docNumber}*) telah diterima oleh Admin dan akan segera ditugaskan kepada petugas ukur kami. Anda akan dihubungi lebih lanjut oleh petugas kami.\n\nTerima Kasih,\nAdmin 1 - BPN Kab. Serang`;
-  const waData = prepareWhatsAppData(pemohonData.kontak, message);
-  
-  if (waData.success) {
-    return { success: true, action: "open_whatsapp", url: waData.url, message: "✅ Notifikasi ke pemohon berhasil disiapkan." };
-  }
-  throw new Error(waData.error);
-}
-
-function sendEmailNotificationToSurveyor(docNum, fileBytes, fileName, contentType) {
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowNum = findRowByDocNumV2(sheet, docNum);
-  if (!rowNum) throw new Error("Nomor dokumen tidak ditemukan.");
-
-  const rowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const surveyorName = rowData[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1];
-  const email = getSurveyorEmail(surveyorName);
-  if (!email) throw new Error(`Email untuk surveyor "${surveyorName}" tidak ditemukan.`);
-
-  const procedure = rowData[COLUMNS.PROSEDUR - 1] || 'N/A';
-  const desa = rowData[COLUMNS.DESA - 1] || 'N/A';
-  const kecamatan = rowData[COLUMNS.KECAMATAN - 1] || 'N/A';
-  const namaPemohon = rowData[COLUMNS.NAMA_PEMOHON - 1] || 'N/A';
-  const kontakPemohon = rowData[COLUMNS.KONTAK_PEMOHON - 1] || 'N/A';
-  const tanggalMulai = new Date(rowData[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1]);
-  const batasWaktu = new Date(rowData[COLUMNS.BATAS_WAKTU_SURVEYOR - 1]);
-  const tanggalMulaiStr = Utilities.formatDate(tanggalMulai, TIME_ZONE, 'dd MMMM yyyy');
-  const batasStr = Utilities.formatDate(batasWaktu, TIME_ZONE, 'dd MMMM yyyy');
-
-  const subject = `Tugas Pengukuran Baru: Berkas No. ${docNum}`;
-  const body = `Hi, Sobat Ukur, <b>${surveyorName}</b><br>Di BPN Kabupaten Serang<br><br>Selamat pagi para pemburu batas,<br><br>Anda telah terpilih untuk menjalankan tugas pengukuran, berikut rinciannya:<br><br>• <b>Nomor Dokumen</b>: ${docNum}<br>• <b>Prosedur</b>: ${procedure}<br>• <b>Lokasi</b>: Desa ${desa}, Kecamatan ${kecamatan}<br>• <b>Nama Pemohon</b>: ${namaPemohon}<br>• <b>Kontak Pemohon</b>: ${kontakPemohon}<br>• <b>Tanggal Mulai</b>: ${tanggalMulaiStr}<br>• <b>Batas Waktu</b>: ${batasStr} (14 hari)<br><br><b>Petunjuk:</b><br>1. <b>Segera hubungi pemohon untuk koordinasi</b><br>2. <b>Surat tugas dilampirkan</b><br><br>Hormat kami,<br><b>Seksi Survei dan Pemetaan</b><br><b>BPN Kabupaten Serang</b>`;
-
-  const emailOptions = { to: email, subject: subject, htmlBody: body };
-  if (fileBytes && fileName && contentType) {
-    emailOptions.attachments = [Utilities.newBlob(Utilities.base64Decode(fileBytes), contentType, fileName)];
-  }
-  
-  // PERBAIKAN: Tangkap error email dan kembalikan pesan spesifik
+function parseDateFromForm(dateString) {
   try {
-    MailApp.sendEmail(emailOptions);
-    return { success: true, message: `✅ Email berhasil dikirim ke ${surveyorName}.` };
-  } catch (err) {
-    throw new Error("Email gagal terkirim: alamat tidak valid atau error server.");
+    if (!dateString || typeof dateString !== 'string') throw new Error("Tanggal tidak valid.");
+    const parts = dateString.split('-');
+    if (parts.length !== 3) throw new Error("Format tanggal salah.");
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    const date = new Date(year, month, day);
+    if (isNaN(date.getTime())) throw new Error("Tanggal tidak valid.");
+    return date;
+  } catch (e) {
+    Logger.log(`Error parseDateFromForm: ${e.message}`);
+    throw e;
   }
 }
 
-// --- ADMIN 2A ---
-function getAdmin2ADataByDocNum(docNum) { 
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowNum = findRowByDocNumV2(sheet, docNum);
-  if (!rowNum) return { isProcessed: false };
-  
-  const rowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const status = rowData[COLUMNS.STATUS_ADMIN_2A - 1] || "";
-
-  if (["Proses", "Selesai", "Ditunda"].includes(status)) {
-    return { isProcessed: true, status: status, keteranganDitunda: rowData[COLUMNS.KETERANGAN_DITUNDA - 1] || "" };
+function clearCacheOnError() {
+  try {
+    scriptCache.removeAll(['initialFormOptions', 'surveyorList']);
+    Logger.log("Cache cleared due to error.");
+  } catch (e) {
+    Logger.log(`Error clearCacheOnError: ${e.message}`);
   }
-  return { isProcessed: false };
+}
+
+function doGet(e) { 
+  try { 
+    let pageName = e.parameter.page || 'Dashboard'; 
+    const role = e.parameter.role || 'Publik'; 
+    if (pageName !== 'Login' && pageName !== 'Dashboard' && role === 'Publik') { 
+      pageName = 'Login'; 
+    } 
+    const template = HtmlService.createTemplateFromFile(pageName); 
+    template.baseUrl = ScriptApp.getService().getUrl(); 
+    template.userName = e.parameter.name || 'Publik'; 
+    template.userRole = role; 
+    if (pageName === 'Dashboard') { 
+      const dashboardData = getDashboardData() || {};
+      template.dashboardData = JSON.stringify(dashboardData).replace(/[-\u001F\u007F-\u009F]/g, ''); // Sanitasi JSON
+      template.kecamatanStats = JSON.stringify(getKecamatanStats() || []).replace(/[-\u001F\u007F-\u009F]/g, '');
+      template.formOptions = {};
+    } else if (pageName === 'DashboardSurveyor') {
+      template.surveyorList = getSurveyorList() || [];
+      template.selectedSurveyor = e.parameter.surveyor || '';
+      template.surveyorData = template.selectedSurveyor ? getSurveyorData(template.selectedSurveyor) : {};
+      template.formOptions = {};
+      template.dashboardData = {};
+    } else if (['FormLanjutan', 'FormAdmin2A', 'FormAdmin2B', 'FormAdmin3', 'FormAdminFinalize'].includes(pageName)) { 
+      template.formOptions = getInitialFormOptions() || {}; 
+      template.dashboardData = {}; 
+    } else { 
+      template.dashboardData = {}; 
+      template.formOptions = {}; 
+    } 
+    return template.evaluate() 
+      .setTitle("Sistem Monitoring Berkas - BPN Kab. Serang") 
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL); 
+  } catch (err) { 
+    Logger.log(`Error doGet: ${err.message} Stack: ${err.stack}`); 
+    return HtmlService.createHtmlOutput(`<h1>Error</h1><p>Halaman tidak ditemukan: ${err.message}</p>`); 
+  } 
+}
+
+function checkLogin(email, password) { 
+  try {
+    if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+      throw new Error("Username atau password tidak valid.");
+    }
+    const user = USER_CREDENTIALS.find(u => u.email === email.trim() && u.password === password); 
+    if (!user) throw new Error("Username atau password salah.");
+    return { status: "success", role: user.role, name: email.split('@')[0] || email }; 
+  } catch (e) {
+    Logger.log(`Error checkLogin: ${e.message}`);
+    return { status: "error", message: e.message };
+  }
+}
+
+function logout() { 
+  try {
+    return ScriptApp.getService().getUrl() + '?page=Login';  // Revised to Login
+  } catch (e) {
+    Logger.log(`Error logout: ${e.message}`);
+    throw e;
+  }
+}
+
+function getInitialFormOptions() { 
+  try {
+    const cacheKey = 'initialFormOptions';
+    let cachedOptions = scriptCache.get(cacheKey); 
+    if (cachedOptions) return JSON.parse(cachedOptions); 
+    const listSheet = getSheet(SHEET_NAMES.LIST); 
+    const respondenSheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    if (!listSheet || !respondenSheet) throw new Error("Sheet LIST atau RESPONDEN tidak ditemukan."); 
+    const lastRow = respondenSheet.getLastRow() - 1; 
+    const rawDocValues = respondenSheet.getRange(2, COLUMNS.NOMOR_BERKAS, lastRow).getValues().flat(); 
+    Logger.log(`Raw docValues sample: ${JSON.stringify(rawDocValues.slice(0, 5))}`);  // Log first 5 raw
+    const docNumbers = rawDocValues.filter(val => val);  // Relax: filter empty only
+    Logger.log(`Filtered docNumbers: ${docNumbers.length}`); 
+    const surveyorList = listSheet.getRange("G2:G29").getValues().flat().filter(val => val); 
+    const mappingOfficers = listSheet.getRange("L2:L6").getValues().flat().filter(val => val); 
+    const statusAdmin2BList = [
+      { value: "Proses", label: "Berkas sedang dalam pengecekan QC" },
+      { value: "Selesai", label: "Berkas Masuk ke Admin 3" }
+    ]; 
+    const statusAdmin3List = listSheet.getRange("P2:P3").getValues().flat()
+      .filter(val => val)
+      .map(s => ({ value: s, label: s })); 
+    const finalStatusList = listSheet.getRange("V2:V3").getValues().flat()
+      .filter(val => val)
+      .map(s => ({ value: s, label: s })); 
+    const options = { docNumbers, surveyorList, mappingOfficers, admin2B: { statusList: statusAdmin2BList }, admin3: { statusList: statusAdmin3List }, adminFinal: { finalStatusList } }; 
+    scriptCache.put(cacheKey, JSON.stringify(options), 7200); 
+    return options; 
+  } catch (e) {
+    Logger.log(`Error getInitialFormOptions: ${e.message}`);
+    clearCacheOnError();
+    throw new Error("Gagal memuat data. Cache dibersihkan, coba lagi.");
+  }
+}
+
+function getSurveyorList() {
+  try {
+    const cacheKey = 'surveyorList';
+    let cachedList = scriptCache.get(cacheKey);
+    if (cachedList) return JSON.parse(cachedList);
+    const respondenSheet = getSheet(SHEET_NAMES.RESPONDEN);
+    if (!respondenSheet) throw new Error("Sheet RESPONDEN tidak tersedia.");
+    const list = respondenSheet.getRange(2, COLUMNS.NAMA_SURVEYOR_PILIHAN, respondenSheet.getLastRow() - 1)
+      .getValues().flat()
+      .filter(val => val && typeof val === 'string' && val.trim() && !/[-\u001F]/.test(val))
+      .filter((v, i, a) => a.indexOf(v) === i).sort();
+    if (!list.length) throw new Error("Daftar surveyor kosong.");
+    scriptCache.put(cacheKey, JSON.stringify(list), 7200);
+    return list;
+  } catch (e) {
+    Logger.log(`Error getSurveyorList: ${e.message}`);
+    clearCacheOnError();
+    throw e;
+  }
+}
+
+function getDataByDocumentNumber(docNumber) { 
+  try {
+    if (!docNumber || typeof docNumber !== 'string') throw new Error("Nomor dokumen tidak valid.");
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowNum = findRowByDocNumV2(sheet, docNumber); 
+    if (!rowNum) return { surveyor: "", kontak: "", namaPemohon: "Tidak Diketahui" }; 
+    const row = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0]; 
+    return { 
+      surveyor: row[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1] || "", 
+      kontak: row[COLUMNS.KONTAK_PEMOHON - 1] || "", 
+      namaPemohon: row[COLUMNS.NAMA_PEMOHON - 1] || "Tidak Diketahui" 
+    }; 
+  } catch (e) {
+    Logger.log(`Error getDataByDocumentNumber: ${e.message}`);
+    throw e;
+  }
+}
+
+function getAdmin2ADataByDocNum(docNum) { 
+  try {
+    if (!docNum || typeof docNum !== 'string') throw new Error("Nomor dokumen tidak valid.");
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowNum = findRowByDocNumV2(sheet, docNum); 
+    if (!rowNum) return { isProcessed: false }; 
+    const row = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0]; 
+    const status = row[COLUMNS.STATUS_ADMIN_2A - 1] || ""; 
+    if (status === "Proses" || status === "Selesai" || status === "Ditunda") { 
+      return { 
+        isProcessed: true, 
+        status: status, 
+        tanggalMulai: row[COLUMNS.TANGGAL_MULAI_ADMIN2A - 1] ? Utilities.formatDate(new Date(row[COLUMNS.TANGGAL_MULAI_ADMIN2A - 1]), TIME_ZONE, 'yyyy-MM-dd') : "", 
+        mappingOfficer: row[COLUMNS.PIC_MAPPING - 1] || "",
+        keteranganDitunda: row[COLUMNS.KETERANGAN_DITUNDA - 1] || ""
+      }; 
+    } 
+    return { isProcessed: false }; 
+  } catch (e) {
+    Logger.log(`Error getAdmin2ADataByDocNum: ${e.message}`);
+    throw e;
+  }
+}
+
+function getAdmin2B_QC_DataByDocNum(docNum) { 
+  try {
+    if (!docNum || typeof docNum !== 'string') throw new Error("Nomor dokumen tidak valid.");
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowNum = findRowByDocNumV2(sheet, docNum); 
+    if (!rowNum) return { found: false }; 
+    const rowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0]; 
+    return { 
+      found: true, 
+      status: rowData[COLUMNS.PIC_QC - 1] || "", 
+      tanggalMulai: rowData[COLUMNS.TANGGAL_MULAI_ADMIN2B - 1] ? Utilities.formatDate(new Date(rowData[COLUMNS.TANGGAL_MULAI_ADMIN2B - 1]), TIME_ZONE, 'yyyy-MM-dd') : "", 
+      tanggalSelesai: rowData[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1] ? Utilities.formatDate(new Date(rowData[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1]), TIME_ZONE, 'yyyy-MM-dd') : "" 
+    }; 
+  } catch (e) {
+    Logger.log(`Error getAdmin2B_QC_DataByDocNum: ${e.message}`);
+    throw e;
+  }
+}
+
+function getPemohonContact(docNum) { 
+  try {
+    if (!docNum || typeof docNum !== 'string') throw new Error("Nomor dokumen tidak valid.");
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowNum = findRowByDocNumV2(sheet, docNum); 
+    if (!rowNum) return { found: false }; 
+    return { 
+      found: true, 
+      email: sheet.getRange(rowNum, COLUMNS.EMAIL_PEMOHON_ADMIN3).getValue() || '', 
+      nama: sheet.getRange(rowNum, COLUMNS.NAMA_PEMOHON).getValue() || 'Tidak Diketahui', 
+      kontak: sheet.getRange(rowNum, COLUMNS.KONTAK_PEMOHON).getValue() || '' 
+    }; 
+  } catch (e) {
+    Logger.log(`Error getPemohonContact: ${e.message}`);
+    throw e;
+  }
+}
+
+function submitFollowUp(data) { 
+  try { 
+    if (!data.documentNumber || !data.surveyor || !data.kontakPemohon || !data.startDate) {
+      throw new Error("Data tidak lengkap.");
+    }
+    const respondenSheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowToUpdate = findRowByDocNumV2(respondenSheet, data.documentNumber); 
+    if (!rowToUpdate) throw new Error("Nomor dokumen tidak ditemukan."); 
+    const startDate = parseDateFromForm(data.startDate); 
+    if (!startDate) throw new Error("Tanggal mulai tidak valid.");
+    setCellValue(respondenSheet.getRange(rowToUpdate, COLUMNS.NAMA_SURVEYOR_PILIHAN), data.surveyor); 
+    setCellValue(respondenSheet.getRange(rowToUpdate, COLUMNS.KONTAK_PEMOHON), data.kontakPemohon); 
+    setCellValue(respondenSheet.getRange(rowToUpdate, COLUMNS.TANGGAL_MULAI_ADMIN1), startDate, true); 
+    const batasWaktu = new Date(startDate.getTime() + 14 * 86400000); 
+    setCellValue(respondenSheet.getRange(rowToUpdate, COLUMNS.BATAS_WAKTU_SURVEYOR), batasWaktu, true); 
+    return "✅ Data berhasil disimpan."; 
+  } catch (e) { 
+    Logger.log(`ERROR submitFollowUp: ${e.message}`); 
+    throw new Error(`Terjadi kesalahan: ${e.message}`); 
+  } 
 }
 
 function submitInitialAdmin2A(data) {
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowToUpdate = findRowByDocNumV2(sheet, data.documentNumber);
-  if (!rowToUpdate) throw new Error("Nomor dokumen tidak ditemukan.");
-  
-  // PERBAIKAN: Batch update
-  const values = [["Proses", Utilities.formatDate(parseDateFromForm(data.tanggalMulai), TIME_ZONE, 'dd/MM/yyyy'), data.mappingOfficer]];
-  sheet.getRange(rowToUpdate, COLUMNS.STATUS_ADMIN_2A, 1, 3).setValues(values);
-  
-  return "✅ Proses awal berhasil disimpan.";
+  try {
+    if (!data.documentNumber || !data.tanggalMulai || !data.mappingOfficer) {
+      throw new Error("Data tidak lengkap.");
+    }
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN);
+    const rowToUpdate = findRowByDocNumV2(sheet, data.documentNumber);
+    if (!rowToUpdate) throw new Error("Nomor dokumen tidak ditemukan.");
+    setCellValue(sheet.getRange(rowToUpdate, COLUMNS.STATUS_ADMIN_2A), "Proses");
+    const tanggalMulaiObj = parseDateFromForm(data.tanggalMulai);
+    if (tanggalMulaiObj) setCellValue(sheet.getRange(rowToUpdate, COLUMNS.TANGGAL_MULAI_ADMIN2A), tanggalMulaiObj, true);
+    setCellValue(sheet.getRange(rowToUpdate, COLUMNS.PIC_MAPPING), data.mappingOfficer);
+    return "✅ Proses awal berhasil disimpan.";
+  } catch (e) {
+    Logger.log(`ERROR submitInitialAdmin2A: ${e.message}`);
+    throw new Error(`Terjadi kesalahan: ${e.message}`);
+  }
 }
 
 function updateAdmin2AStatus(data) {
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowToUpdate = findRowByDocNumV2(sheet, data.documentNumber);
-  if (!rowToUpdate) throw new Error("Nomor dokumen tidak ditemukan.");
-  
-  const newStatus = data.newStatus;
-  sheet.getRange(rowToUpdate, COLUMNS.STATUS_ADMIN_2A).setValue(newStatus);
-  
-  let waMsgTemplate = "";
-  let responseMessage = "";
-
-  if (newStatus === "Selesai") {
-    if (!data.tanggalSelesai) throw new Error("Tanggal Selesai wajib diisi.");
-    sheet.getRange(rowToUpdate, COLUMNS.TANGGAL_SELESAI_ADMIN2A).setValue(Utilities.formatDate(parseDateFromForm(data.tanggalSelesai), TIME_ZONE, 'dd/MM/yyyy'));
-    responseMessage = "✅ Berkas berhasil ditandai Selesai!";
-    waMsgTemplate = `Selamat siang Bapak/Ibu *{nama_pemohon}*,\nAda kabar baik! Proses pemetaan untuk berkas (No. *${data.documentNumber}*) telah SELESAI.\nSaat ini, berkas Anda masuk tahap Quality Control (QC).\nTerima Kasih\nTeam Monitoring Berkas`;
-  } else if (newStatus === "Ditunda") {
-    if (!data.keteranganDitunda) throw new Error("Alasan Ditunda wajib diisi.");
-    sheet.getRange(rowToUpdate, COLUMNS.KETERANGAN_DITUNDA).setValue(data.keteranganDitunda);
-    responseMessage = "✅ Berkas berhasil ditandai Ditunda!";
-    waMsgTemplate = `Selamat siang Bapak/Ibu *{nama_pemohon}*,\nBerkas (No. *${data.documentNumber}*) untuk sementara ditunda.\nAlasan: ${data.keteranganDitunda}\nSilakan koordinasi dengan petugas ukur dalam 30 hari, atau permohonan akan DIBATALKAN.\nTerima Kasih\nTeam Monitoring Berkas`;
-  } else {
-    throw new Error("Status tidak valid.");
-  }
-
-  const pemohonData = getPemohonContact(data.documentNumber);
-  if (pemohonData.found && pemohonData.kontak) {
-    const finalWaMsg = waMsgTemplate.replace('{nama_pemohon}', pemohonData.nama);
-    const waData = prepareWhatsAppData(pemohonData.kontak, finalWaMsg);
-    if (waData.success) {
-      return { status: "success_with_wa", message: responseMessage + "<br>📱 Silakan lanjutkan pengiriman pesan WhatsApp.", url: waData.url };
+  try {
+    if (!data.documentNumber || !data.newStatus) throw new Error("Data tidak lengkap.");
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN);
+    const rowToUpdate = findRowByDocNumV2(sheet, data.documentNumber);
+    if (!rowToUpdate) throw new Error("Nomor dokumen tidak ditemukan.");
+    const newStatus = data.newStatus;
+    setCellValue(sheet.getRange(rowToUpdate, COLUMNS.STATUS_ADMIN_2A), newStatus);
+    let waMsgTemplate = "";
+    let responseMessage = "";
+    if (newStatus === "Selesai") {
+      if (!data.tanggalSelesai) throw new Error("Tanggal Selesai wajib diisi.");
+      const tanggalSelesaiObj = parseDateFromForm(data.tanggalSelesai);
+      if (tanggalSelesaiObj) setCellValue(sheet.getRange(rowToUpdate, COLUMNS.TANGGAL_SELESAI_ADMIN2A), tanggalSelesaiObj, true);
+      responseMessage = "✅ Berkas berhasil ditandai Selesai!";
+      waMsgTemplate = `Selamat siang Bapak/Ibu *{nama_pemohon}*,\nAda kabar baik! Proses pemetaan untuk berkas (No. *${data.documentNumber}*) telah SELESAI.\nSaat ini, berkas Anda masuk tahap Quality Control (QC).\nTerima Kasih\nTeam Monitoring Berkas`;
+    } else if (newStatus === "Ditunda") {
+      if (!data.keteranganDitunda) throw new Error("Alasan Ditunda wajib diisi.");
+      setCellValue(sheet.getRange(rowToUpdate, COLUMNS.KETERANGAN_DITUNDA), data.keteranganDitunda);
+      responseMessage = "✅ Berkas berhasil ditandai Ditunda!";
+      waMsgTemplate = `Selamat siang Bapak/Ibu *{nama_pemohon}*,\nBerkas (No. *${data.documentNumber}*) untuk sementara ditunda.\nAlasan: ${data.keteranganDitunda}\nSilakan koordinasi dengan petugas ukur dalam 30 hari, atau permohonan akan DIBATALKAN.\nTerima Kasih\nTeam Monitoring Berkas`;
     } else {
-      return { status: "success", message: responseMessage + "<br>" + waData.error }; // PERBAIKAN: Tampilkan pesan kegagalan spesifik
+      throw new Error("Status tidak valid.");
     }
+    const pemohonData = getPemohonContact(data.documentNumber);
+    if (pemohonData.found && pemohonData.kontak) {
+      const finalWaMsg = waMsgTemplate.replace('{nama_pemohon}', pemohonData.nama || 'Pemohon');
+      const waData = prepareWhatsAppData(pemohonData.kontak, finalWaMsg);
+      if (waData.success) {
+        return { status: "success_with_wa", message: responseMessage + "<br>📱 Silakan lanjutkan pengiriman pesan WhatsApp.", url: waData.url };
+      } else {
+        responseMessage += "<br>⚠️ Gagal proses WA: " + waData.error;
+      }
+    }
+    return { status: "success", message: responseMessage + "<br>⚠️ Notifikasi WhatsApp tidak dikirim (kontak pemohon tidak ditemukan)." };
+  } catch (e) {
+    Logger.log(`ERROR updateAdmin2AStatus: ${e.message}`);
+    throw new Error(`Terjadi kesalahan: ${e.message}`);
   }
-  return { status: "success", message: responseMessage };
-}
-
-// --- ADMIN 2B ---
-function getAdmin2B_QC_DataByDocNum(docNum) { 
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowNum = findRowByDocNumV2(sheet, docNum);
-  if (!rowNum) return { found: false };
-  
-  const rowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
-  return {
-    found: true,
-    status: rowData[COLUMNS.PIC_QC - 1] || "",
-    tanggalMulai: rowData[COLUMNS.TANGGAL_MULAI_ADMIN2B - 1] ? Utilities.formatDate(new Date(rowData[COLUMNS.TANGGAL_MULAI_ADMIN2B - 1]), TIME_ZONE, 'yyyy-MM-dd') : "",
-    tanggalSelesai: rowData[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1] ? Utilities.formatDate(new Date(rowData[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1]), TIME_ZONE, 'yyyy-MM-dd') : ""
-  };
 }
 
 function submitAdmin2B_QC(data) { 
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowToUpdate = findRowByDocNumV2(sheet, data.documentNumber);
-  if (!rowToUpdate) throw new Error("Nomor dokumen tidak ditemukan.");
-  
-  // PERBAIKAN: Batch update
-  const values = [[data.status, Utilities.formatDate(parseDateFromForm(data.tanggalMulai), TIME_ZONE, 'dd/MM/yyyy')]];
-  sheet.getRange(rowToUpdate, COLUMNS.PIC_QC, 1, 2).setValues(values);
-  
-  return "✅ Proses awal QC berhasil disimpan.";
+  try {
+    if (!data.documentNumber || !data.status || !data.tanggalMulai) throw new Error("Data tidak lengkap.");
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowToUpdate = findRowByDocNumV2(sheet, data.documentNumber); 
+    if (!rowToUpdate) throw new Error("Nomor dokumen tidak ditemukan."); 
+    setCellValue(sheet.getRange(rowToUpdate, COLUMNS.PIC_QC), data.status); 
+    setCellValue(sheet.getRange(rowToUpdate, COLUMNS.TANGGAL_MULAI_ADMIN2B), parseDateFromForm(data.tanggalMulai), true); 
+    return "✅ Proses awal QC berhasil disimpan."; 
+  } catch (e) {
+    Logger.log(`ERROR submitAdmin2B_QC: ${e.message}`);
+    throw new Error(`Terjadi kesalahan: ${e.message}`);
+  }
 }
 
 function updateAdmin2B_QC_Selesai(data) { 
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowToUpdate = findRowByDocNumV2(sheet, data.documentNumber);
-  if (!rowToUpdate) throw new Error("Nomor dokumen tidak ditemukan.");
-  
-  // PERBAIKAN: Batch update
-  const values = [["Selesai", Utilities.formatDate(parseDateFromForm(data.tanggalSelesai), TIME_ZONE, 'dd/MM/yyyy')]];
-  sheet.getRange(rowToUpdate, COLUMNS.PIC_QC, 1, 2).setValues(values);
-  
-  return "✅ Berkas sudah ditandai Selesai QC!";
-}
-
-// --- ADMIN 3 ---
-function saveAdmin3Data(formData) {
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowNum = findRowByDocNumV2(sheet, formData.documentNumber);
-  if (!rowNum) throw new Error("Dokumen tidak ditemukan.");
-
-  // PERBAIKAN: Batch update
-  const values = [[formData.status, Utilities.formatDate(parseDateFromForm(formData.tanggalSelesai), TIME_ZONE, 'dd/MM/yyyy'), formData.emailPemohon || '']];
-  sheet.getRange(rowNum, COLUMNS.KOMENTAR_QC_ADMIN3, 1, 3).setValues(values);
-  return { success: true, message: "✅ Data verifikasi berhasil disimpan." };
-}
-
-function sendAdmin3Notification(docNum) {
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowNum = findRowByDocNumV2(sheet, docNum);
-  if (!rowNum) throw new Error("Dokumen tidak ditemukan.");
-
-  const rowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const waNumber = rowData[COLUMNS.KONTAK_PEMOHON - 1];
-  if (!waNumber) throw new Error("Nomor WhatsApp pemohon tidak ditemukan.");
-
-  const namaPemohon = rowData[COLUMNS.NAMA_PEMOHON - 1] || 'Pemohon';
-  const procedure = rowData[COLUMNS.PROSEDUR - 1] || 'N/A';
-  const status = rowData[COLUMNS.KOMENTAR_QC_ADMIN3 - 1] || 'N/A';
-  
-  const waMsg = `Yth. Bapak/Ibu ${namaPemohon},\n\nPermohonan *${procedure}* Anda (No. *${docNum}*) telah selesai tahap Pemetaan dan QC, dinyatakan: *${status}*.\nTerima Kasih,\nBPN Kab. Serang`;
-  const waData = prepareWhatsAppData(waNumber, waMsg);
-
-  if (waData.success) {
-    return { success: true, action: "open_whatsapp", url: waData.url, message: "Silakan lanjutkan pengiriman pesan WhatsApp." };
+  try {
+    if (!data.documentNumber || !data.tanggalSelesai) throw new Error("Data tidak lengkap.");
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowToUpdate = findRowByDocNumV2(sheet, data.documentNumber); 
+    if (!rowToUpdate) throw new Error("Nomor dokumen tidak ditemukan."); 
+    setCellValue(sheet.getRange(rowToUpdate, COLUMNS.PIC_QC), "Selesai"); 
+    setCellValue(sheet.getRange(rowToUpdate, COLUMNS.TANGGAL_SELESAI_ADMIN2B), parseDateFromForm(data.tanggalSelesai), true); 
+    return "✅ Berkas sudah ditandai Selesai QC!"; 
+  } catch (e) {
+    Logger.log(`ERROR updateAdmin2B_QC_Selesai: ${e.message}`);
+    throw new Error(`Terjadi kesalahan: ${e.message}`);
   }
-  throw new Error(waData.error);
 }
 
-// --- ADMIN 4 ---
-function saveAdminFinalData(formData) {
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowNum = findRowByDocNumV2(sheet, formData.documentNumber);
-  if (!rowNum) throw new Error("Dokumen tidak ditemukan.");
-
-  // PERBAIKAN: Batch update
-  const values = [[formData.finalStatus, Utilities.formatDate(parseDateFromForm(formData.date), TIME_ZONE, 'dd/MM/yyyy')]];
-  sheet.getRange(rowNum, COLUMNS.STATUS_FINAL, 1, 2).setValues(values);
-  
-  return { success: true, message: "✅ Data final berhasil disimpan." };
-}
-
-function sendAdminFinalNotification(docNum) {
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const rowNum = findRowByDocNumV2(sheet, docNum);
-  if (!rowNum) throw new Error("Dokumen tidak ditemukan.");
-
-  const rowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const waNumber = rowData[COLUMNS.KONTAK_PEMOHON - 1];
-  if (!waNumber) throw new Error("Nomor WhatsApp pemohon tidak ditemukan.");
-
-  const namaPemohon = rowData[COLUMNS.NAMA_PEMOHON - 1] || 'Pemohon';
-  const finalStatus = rowData[COLUMNS.STATUS_FINAL - 1] || 'N/A';
-  
-  const waMsg = `Yth. Bapak/Ibu ${namaPemohon},\nPermohonan (No. *${docNum}*) telah selesai diproses dengan status akhir: *${finalStatus}*.\n\nTerima Kasih\nTeam Monitoring Berkas`;
-  const waData = prepareWhatsAppData(waNumber, waMsg);
-
-  if (waData.success) {
-    return { success: true, action: "open_whatsapp", url: waData.url, message: "Silakan lanjutkan pengiriman pesan WhatsApp." };
+function submitAdmin3(formData) { 
+  try {
+    if (!formData.documentNumber || !formData.status || !formData.tanggalSelesai) {
+      throw new Error("Data tidak lengkap.");
+    }
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowNum = findRowByDocNumV2(sheet, formData.documentNumber); 
+    if (!rowNum) throw new Error("Dokumen tidak ditemukan."); 
+    setCellValue(sheet.getRange(rowNum, COLUMNS.KOMENTAR_QC_ADMIN3), formData.status); 
+    setCellValue(sheet.getRange(rowNum, COLUMNS.TANGGAL_SELESAI_ADMIN3), parseDateFromForm(formData.tanggalSelesai), true); 
+    if (formData.emailPemohon) setCellValue(sheet.getRange(rowNum, COLUMNS.EMAIL_PEMOHON_ADMIN3), formData.emailPemohon); 
+    let response = { status: "success", message: "✅ Data berhasil disimpan.", action: "display_message" }; 
+    const updatedRowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0]; 
+    const procedure = updatedRowData[COLUMNS.PROSEDUR - 1] || 'N/A'; 
+    const desa = updatedRowData[COLUMNS.DESA - 1] || 'N/A'; 
+    const kecamatan = updatedRowData[COLUMNS.KECAMATAN - 1] || 'N/A'; 
+    const surveyor = updatedRowData[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1] || 'N/A'; 
+    if (formData.sendWA) { 
+      const waNumber = updatedRowData[COLUMNS.KONTAK_PEMOHON - 1]; 
+      if (waNumber) { 
+        const namaPemohon = updatedRowData[COLUMNS.NAMA_PEMOHON - 1] || 'N/A'; 
+        const waMsg = `Yth. Bapak/Ibu ${namaPemohon},\n\nPermohonan *${procedure}* Anda (No. *${formData.documentNumber}*) telah selesai tahap Pemetaan dan QC, dinyatakan: *${formData.status}*.\nLokasi: Desa ${desa}, Kec. ${kecamatan}\nSurveyor: ${surveyor}\nTerima Kasih,\nBPN Kab. Serang`; 
+        const waData = prepareWhatsAppData(waNumber, waMsg); 
+        if (waData.success) { 
+          response.action = "open_whatsapp"; 
+          response.url = waData.url; 
+          response.message += "<br>📱 Silakan lanjutkan pengiriman pesan WhatsApp."; 
+        } else { 
+          response.message += "<br>⚠️ Gagal proses WA: " + waData.error; 
+        } 
+      } else { 
+        response.message += "<br>⚠️ Nomor WhatsApp tidak ditemukan."; 
+      } 
+    } 
+    return response; 
+  } catch (e) {
+    Logger.log(`ERROR submitAdmin3: ${e.message}`);
+    throw new Error(`Terjadi kesalahan: ${e.message}`);
   }
-  throw new Error(waData.error);
 }
 
-// ===================================================================================
-// BAGIAN 6: FUNGSI DASHBOARD
-// ===================================================================================
+function submitAdminFinal(formData) { 
+  try {
+    if (!formData.documentNumber || !formData.finalStatus || !formData.date) {
+      throw new Error("Data tidak lengkap.");
+    }
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowNum = findRowByDocNumV2(sheet, formData.documentNumber); 
+    if (!rowNum) throw new Error("Nomor dokumen tidak ditemukan."); 
+    setCellValue(sheet.getRange(rowNum, COLUMNS.STATUS_FINAL), formData.finalStatus); 
+    setCellValue(sheet.getRange(rowNum, COLUMNS.TANGGAL_SELESAI_FINAL), parseDateFromForm(formData.date), true); 
+    let response = { status: "success", message: "✅ Data final berhasil disimpan.", action: "display_message" }; 
+    const updatedRowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0]; 
+    const nama = updatedRowData[COLUMNS.NAMA_PEMOHON - 1] || 'N/A'; 
+    const waNumber = updatedRowData[COLUMNS.KONTAK_PEMOHON - 1]; 
+    if (formData.sendWA && waNumber) { 
+      const waMsg = `Yth. Bapak/Ibu ${nama},\n\nPermohonan (No. *${formData.documentNumber}*) telah selesai diproses, dinyatakan: *${formData.finalStatus}*.\nTerima Kasih,\nBPN Kab. Serang`; 
+      const waData = prepareWhatsAppData(waNumber, waMsg); 
+      if (waData.success) { 
+        response.action = "open_whatsapp"; 
+        response.url = waData.url; 
+        response.message += "<br>📱 Silakan lanjutkan pengiriman pesan WhatsApp."; 
+      } else { 
+        response.message += "<br>⚠️ Gagal proses WA: " + waData.error; 
+      } 
+    } 
+    return response; 
+  } catch (e) {
+    Logger.log(`ERROR submitAdminFinal: ${e.message}`);
+    throw new Error(`Terjadi kesalahan: ${e.message}`);
+  }
+}
+
+function sendNotificationToSurveyor(docNumber) { 
+  try { 
+    if (!docNumber || typeof docNumber !== 'string') throw new Error("Nomor dokumen tidak valid.");
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowNum = findRowByDocNumV2(sheet, docNumber); 
+    if (!rowNum) throw new Error("Nomor dokumen tidak ditemukan."); 
+    const rowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0]; 
+    const surveyor = rowData[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1] || "Tidak Diketahui"; 
+    const docNum = rowData[COLUMNS.NOMOR_BERKAS - 1] || "Tidak Diketahui"; 
+    const contact = getSurveyorContact(surveyor); 
+    if (!contact) throw new Error("Kontak surveyor tidak ditemukan."); 
+    const message = `Halo, Sobat Ukur ${surveyor}!\nAnda mendapat tugas untuk berkas ${docNum}. Silakan ambil surat tugas di Seksi Pemetaan dan Survey, BPN Kab. Serang.\nTerima Kasih,\nAdmin 1`; 
+    const waData = prepareWhatsAppData(contact, message); 
+    if (waData.success) { 
+      return { success: true, action: "open_whatsapp", url: waData.url, message: "✅ Notifikasi ke surveyor berhasil disiapkan." }; 
+    } 
+    throw new Error(waData.error); 
+  } catch (e) { 
+    Logger.log(`Error sendNotificationToSurveyor: ${e.message}`); 
+    return { success: false, message: `❌ Gagal mengirim notifikasi: ${e.message}` }; 
+  } 
+}
+
+function sendNotificationToApplicant(docNumber, sendEmail = false) {
+  try {
+    if (!docNumber || typeof docNumber !== 'string') throw new Error("Nomor dokumen tidak valid.");
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowNum = findRowByDocNumV2(sheet, docNumber); 
+    if (!rowNum) throw new Error("Nomor dokumen tidak ditemukan.");
+    const rowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0]; 
+    const namaPemohon = rowData[COLUMNS.NAMA_PEMOHON - 1] || "Tidak Diketahui"; 
+    const contact = rowData[COLUMNS.KONTAK_PEMOHON - 1]; 
+    if (!contact) throw new Error("Kontak pemohon tidak ditemukan.");
+    const message = `Halo, Bapak/Ibu ${namaPemohon}! Berkas Anda (${docNumber}) telah ditugaskan ke surveyor. Silakan koordinasi untuk proses selanjutnya.\nTerima Kasih,\nAdmin 1`;
+    const waData = prepareWhatsAppData(contact, message); 
+    let success = false;
+    let url = null;
+    if (waData.success) {
+      success = true;
+      url = waData.url;
+    } else if (sendEmail && rowData[COLUMNS.EMAIL_PEMOHON_ADMIN3 - 1]) {
+      const email = rowData[COLUMNS.EMAIL_PEMOHON_ADMIN3 - 1];
+      MailApp.sendEmail(email, 'Notif Berkas BPN', message);
+      success = true;
+    }
+    if (success) {
+      return { success: true, action: "open_whatsapp", url: url, message: url ? "✅ WA siap dikirim." : "✅ Email dikirim." };
+    }
+    throw new Error(waData.error);
+  } catch (e) { 
+    Logger.log(`Error sendToApplicant: ${e.message}`); 
+    return { success: false, message: `❌ Gagal: ${e.message}` }; 
+  } 
+}
+
 function getDashboardData() { 
-  const cacheKey = 'dashboardData';
-  let cached = scriptCache.get(cacheKey);
-  if (cached) return JSON.parse(cached);
+  try { 
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()); 
+    const data = range.getValues(); 
+    const stats = { totalBerkas: 0, pendingAdmin1: 0, pendingAdmin2A: 0, pendingAdmin2B: 0, pendingAdmin3: 0, disetujui: 0, dibatalkan: 0 }; 
+    const performanceScores = { admin2A: { ONTIME: 0, LATE: 0 }, admin3: { ONTIME: 0, LATE: 0 }, admin4: { ONTIME: 0, LATE: 0 } }; 
+    const surveyorScores = {}; 
+    const mappingScores = {}; 
+    data.forEach(row => { 
+      if (!row[COLUMNS.TIMESTAMP - 1]) return; 
+      stats.totalBerkas++; 
+      if (row[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN1 - 1]) stats.pendingAdmin1++; 
+      if (row[COLUMNS.TANGGAL_SELESAI_ADMIN1 - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN2A - 1]) stats.pendingAdmin2A++; 
+      if (row[COLUMNS.TANGGAL_SELESAI_ADMIN2A - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1]) stats.pendingAdmin2B++; 
+      if (row[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN3 - 1]) stats.pendingAdmin3++; 
+      const statusFinal = row[COLUMNS.STATUS_FINAL - 1]; 
+      if (statusFinal === "Disetujui Permohonan") stats.disetujui++; 
+      if (statusFinal === "Dibatalkan Permohonan") stats.dibatalkan++; 
+      const statusAdmin2A = row[COLUMNS.STATUS_MAPPING_ONTIME_LATE - 1]; 
+      if (statusAdmin2A && statusAdmin2A.toString().toUpperCase() === 'ONTIME') performanceScores.admin2A.ONTIME++; 
+      else if (statusAdmin2A && statusAdmin2A.toString().toUpperCase() === 'LATE') performanceScores.admin2A.LATE++; 
+      const statusAdmin3 = row[COLUMNS.STATUS_ADMIN3_ONTIME_LATE - 1]; 
+      if (statusAdmin3 && statusAdmin3.toString().toUpperCase() === 'ONTIME') performanceScores.admin3.ONTIME++; 
+      else if (statusAdmin3 && statusAdmin3.toString().toUpperCase() === 'LATE') performanceScores.admin3.LATE++; 
+      const statusAdmin4 = row[COLUMNS.STATUS_ADMIN4_ONTIME_LATE - 1]; 
+      if (statusAdmin4 && statusAdmin4.toString().toUpperCase() === 'ONTIME') performanceScores.admin4.ONTIME++; 
+      else if (statusAdmin4 && statusAdmin4.toString().toUpperCase() === 'LATE') performanceScores.admin4.LATE++; 
+      const surveyorName = row[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1]; 
+      const surveyorStatus = row[COLUMNS.STATUS_SURVEYOR_ONTIME_LATE - 1]; 
+      if (surveyorName && surveyorStatus && typeof surveyorName === 'string' && !/[-\u001F]/.test(surveyorName)) { 
+        if (!surveyorScores[surveyorName]) surveyorScores[surveyorName] = { ontime: 0, late: 0 }; 
+        if (surveyorStatus.toString().toUpperCase() === 'ONTIME') surveyorScores[surveyorName].ontime++; 
+        if (surveyorStatus.toString().toUpperCase() === 'LATE') surveyorScores[surveyorName].late++; 
+      } 
+      const mappingName = row[COLUMNS.PIC_MAPPING - 1]; 
+      const mappingStatus = row[COLUMNS.STATUS_MAPPING_ONTIME_LATE - 1]; 
+      if (mappingName && mappingStatus && typeof mappingName === 'string' && !/[-\u001F]/.test(mappingName)) { 
+        if (!mappingScores[mappingName]) mappingScores[mappingName] = { ontime: 0, late: 0 }; 
+        if (mappingStatus.toString().toUpperCase() === 'ONTIME') mappingScores[mappingName].ontime++; 
+      } 
+    }); 
+    const surveyorArray = Object.entries(surveyorScores).map(([name, scores]) => ({ name, ...scores })); 
+    const mappingArray = Object.entries(mappingScores).map(([name, scores]) => ({ name, ...scores })); 
+    const result = { 
+      stats, 
+      performance: performanceScores, 
+      individualPerformance: { 
+        surveyorTopOntime: surveyorArray.sort((a, b) => b.ontime - a.ontime).slice(0, 2), 
+        surveyorTopLate: surveyorArray.sort((a, b) => b.late - a.late).slice(0, 2), 
+        mappingTopOntime: mappingArray.sort((a, b) => b.ontime - a.ontime).slice(0, 1) 
+      } 
+    }; 
+    return JSON.parse(JSON.stringify(result)); // Pastikan JSON bersih
+  } catch (e) { 
+    Logger.log(`Error getDashboardData: ${e.message}`); 
+    return { stats: {}, performance: {}, individualPerformance: {} }; 
+  } 
+}
 
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-  
-  const stats = { totalBerkas: 0, pendingAdmin1: 0, pendingAdmin2A: 0, pendingAdmin2B: 0, pendingAdmin3: 0, disetujui: 0, dibatalkan: 0 };
-  const surveyorScores = {};
-  const mappingScores = {};
-  
-  data.forEach(row => {
-    if (!row[COLUMNS.TIMESTAMP - 1]) return;
-    stats.totalBerkas++;
-    
-    if (row[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN1 - 1]) stats.pendingAdmin1++;
-    else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN1 - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN2A - 1]) stats.pendingAdmin2A++;
-    else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN2A - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1]) stats.pendingAdmin2B++;
-    else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN3 - 1]) stats.pendingAdmin3++;
-    
-    const statusFinal = row[COLUMNS.STATUS_FINAL - 1];
-    if (statusFinal === "Disetujui Permohonan") stats.disetujui++;
-    if (statusFinal === "Dibatalkan Permohonan") stats.dibatalkan++;
-    
-    const surveyorName = row[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1];
-    const surveyorStatus = row[COLUMNS.STATUS_SURVEYOR_ONTIME_LATE - 1];
-    if (surveyorName && surveyorStatus) {
-      if (!surveyorScores[surveyorName]) surveyorScores[surveyorName] = { ontime: 0, late: 0 };
-      if (surveyorStatus.toUpperCase() === 'ONTIME') surveyorScores[surveyorName].ontime++;
-      if (surveyorStatus.toUpperCase() === 'LATE') surveyorScores[surveyorName].late++;
+function sendEmailToSurveyor(docNumber) {
+  try {
+    if (!docNumber || typeof docNumber !== 'string') throw new Error("Nomor dokumen tidak valid.");
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN); 
+    const rowNum = findRowByDocNumV2(sheet, docNumber); 
+    if (!rowNum) throw new Error("Nomor dokumen tidak ditemukan.");
+    const rowData = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0]; 
+    const surveyor = rowData[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1] || "Tidak Diketahui"; 
+    const docNum = rowData[COLUMNS.NOMOR_BERKAS - 1] || "Tidak Diketahui"; 
+    const procedure = rowData[COLUMNS.PROSEDUR - 1] || "N/A";  // Added
+    const desa = rowData[COLUMNS.DESA - 1] || "N/A";  // Added
+    const kecamatan = rowData[COLUMNS.KECAMATAN - 1] || "N/A";  // Added
+    const namaPemohon = rowData[COLUMNS.NAMA_PEMOHON - 1] || "Tidak Diketahui";  // Added
+    const kontakPemohon = rowData[COLUMNS.KONTAK_PEMOHON - 1] || "Tidak Diketahui";  // Added
+    const tanggalMulaiStr = Utilities.formatDate(new Date(rowData[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1]), TIME_ZONE, "dd/MM/yyyy") || "N/A";  // Added
+    const batasWaktu = rowData[COLUMNS.BATAS_WAKTU_SURVEYOR - 1] ? Utilities.formatDate(new Date(rowData[COLUMNS.BATAS_WAKTU_SURVEYOR - 1]), TIME_ZONE, "dd/MM/yyyy") : "N/A";  // Added
+    const listSheet = getSheet(SHEET_NAMES.LIST); 
+    const surveyorList = listSheet.getRange("G2:G29").getValues().flat(); 
+    const emailList = listSheet.getRange("H2:H29").getValues().flat(); 
+    const emailIndex = surveyorList.findIndex(name => name && name.trim().toLowerCase() === surveyor.trim().toLowerCase()); 
+    if (emailIndex === -1 || !emailList[emailIndex]) throw new Error("Email surveyor tidak ditemukan.");
+    const email = emailList[emailIndex];
+    Logger.log(`Email surveyor: ${email}`);  // Debug
+    const subject = `📄 Surat Tugas Pengukuran untuk ${surveyor}`;
+    const body = `
+Hi, Sobat Ukur, <b>${surveyor}</b><br>
+Di BPN Kabupaten Serang<br><br>
+
+Selamat pagi para pemburu batas,<br><br>
+Anda telah terpilih untuk menjalankan tugas pengukuran, berikut rinciannya:<br><br>
+
+• <b>Nomor Dokumen</b>: ${docNum}<br>
+• <b>Prosedur</b>: ${procedure}<br>
+• <b>Lokasi</b>: Desa ${desa}, Kecamatan ${kecamatan}<br>
+• <b>Nama Pemohon</b>: ${namaPemohon}<br>
+• <b>Kontak Pemohon</b>: ${kontakPemohon}<br>
+• <b>Tanggal Mulai</b>: ${tanggalMulaiStr}<br>
+• <b>Batas Waktu</b>: ${batasWaktu} (14 hari)<br><br>
+
+<b>Petunjuk:</b><br>
+1. <b>Segera hubungi pemohon untuk koordinasi</b><br>
+2. <b>Surat tugas dilampirkan</b><br><br>
+
+Hormat kami,<br>
+<b>Seksi Survei dan Pemetaan</b><br>
+<b>BPN Kabupaten Serang</b>
+    `;
+    MailApp.sendEmail(email, subject, body.replace(/<br>/g, '\n').replace(/<b>(.*?)<\/b>/g, '$1'), { htmlBody: body });
+    return { success: true, message: "✅ Email dikirim ke surveyor." }; 
+  } catch (e) { 
+    Logger.log(`Error sendEmailToSurveyor: ${e.message}`); 
+    return { success: false, message: `❌ Gagal: ${e.message}` }; 
+  } 
+}
+
+function getSurveyorData(surveyorName) {
+  try {
+    if (!surveyorName || typeof surveyorName !== 'string' || /[-\u001F]/.test(surveyorName)) {
+      throw new Error("Nama surveyor tidak valid.");
     }
-    
-    const mappingName = row[COLUMNS.PIC_MAPPING - 1];
-    const mappingStatus = row[COLUMNS.STATUS_MAPPING_ONTIME_LATE - 1];
-    if (mappingName && mappingStatus) {
-      if (!mappingScores[mappingName]) mappingScores[mappingName] = { ontime: 0, late: 0 };
-      if (mappingStatus.toUpperCase() === 'ONTIME') mappingScores[mappingName].ontime++;
-    }
-  });
+    const cacheKey = `surveyorData_${surveyorName}`;
+    let cachedData = scriptCache.get(cacheKey);
+    if (cachedData) return JSON.parse(cachedData);
 
-  const toArray = (scores, key) => Object.entries(scores).map(([name, s]) => ({ name, ...s })).sort((a,b) => b[key] - a[key]);
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN);
+    const range = sheet.getRange(1, COLUMNS.NAMA_SURVEYOR_PILIHAN, sheet.getLastRow());
+    const textFinder = range.createTextFinder(surveyorName).matchEntireCell(true);
+    const foundRows = [];
+    let cell = textFinder.findNext();
+    while (cell) { foundRows.push(cell.getRow()); cell = textFinder.findNext(); }
 
-  const result = { 
-    stats, 
-    individualPerformance: {
-      surveyorTopOntime: toArray(surveyorScores, 'ontime').slice(0, 2),
-      surveyorTopLate: toArray(surveyorScores, 'late').slice(0, 2),
-      mappingTopOntime: toArray(mappingScores, 'ontime').slice(0, 1)
-    },
-    kecamatanStats: getKecamatanStats()
-  };
+    const result = {
+      stats: { total: 0, ontime: 0, late: 0 },
+      workload: {
+        surveyor: { count: 0, docs: [] }, pemetaan: { count: 0, docs: [] },
+        qc: { count: 0, docs: [] }, verifikasi: { count: 0, docs: [] },
+        finalisasi: { count: 0, docs: [] }, selesai: { count: 0, docs: [] },
+      },
+      lastUpdate: Utilities.formatDate(new Date(), TIME_ZONE, "HH:mm dd/MM/yyyy")
+    };
 
-  scriptCache.put(cacheKey, JSON.stringify(result), 3600);
-  return result;
+    foundRows.forEach(rowNum => {
+      const row = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const docNum = row[COLUMNS.NOMOR_BERKAS - 1] || 'N/A';
+      if (typeof docNum !== 'string' || /[-\u001F]/.test(docNum)) return;
+
+      result.stats.total++;
+      const performance = row[COLUMNS.STATUS_SURVEYOR_ONTIME_LATE - 1];
+      if (performance === 'ONTIME') result.stats.ontime++;
+      if (performance === 'LATE') result.stats.late++;
+
+      const docData = {
+        nomorBerkas: typeof docNum === 'string' && docNum.includes('/') ? docNum.split('/').slice(1).join('/') : docNum,
+        prosedur: row[COLUMNS.PROSEDUR - 1] || 'N/A',
+        desa: row[COLUMNS.DESA - 1] || 'N/A',
+        kecamatan: row[COLUMNS.KECAMATAN - 1] || 'N/A',
+        namaPemohon: row[COLUMNS.NAMA_PEMOHON - 1] || 'N/A',
+        tanggalMulai: row[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1] ? Utilities.formatDate(new Date(row[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1]), TIME_ZONE, 'dd/MM/yyyy') : '',
+        batasWaktu: row[COLUMNS.BATAS_WAKTU_SURVEYOR - 1] ? Utilities.formatDate(new Date(row[COLUMNS.BATAS_WAKTU_SURVEYOR - 1]), TIME_ZONE, 'dd/MM/yyyy') : ''
+      };
+
+      if (row[COLUMNS.TANGGAL_SELESAI_FINAL - 1]) {
+        result.workload.selesai.count++;
+        result.workload.selesai.docs.push(docData);
+      } else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN3 - 1]) {
+        result.workload.finalisasi.count++;
+        result.workload.finalisasi.docs.push(docData);
+      } else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1]) {
+        result.workload.verifikasi.count++;
+        result.workload.verifikasi.docs.push(docData);
+      } else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN2A - 1]) {
+        result.workload.qc.count++;
+        result.workload.qc.docs.push(docData);
+      } else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN1 - 1]) {
+        result.workload.pemetaan.count++;
+        result.workload.pemetaan.docs.push(docData);
+      } else if (row[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1]) {
+        result.workload.surveyor.count++;
+        result.workload.surveyor.docs.push(docData);
+      }
+    });
+
+    scriptCache.put(cacheKey, JSON.stringify(result), 7200);
+    return result;
+  } catch (e) {
+    Logger.log(`Error getSurveyorData: ${e.message}`);
+    clearCacheOnError();
+    throw new Error(`Terjadi kesalahan: ${e.message}`);
+  }
 }
 
 function getKecamatanStats() {
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const kecamatanData = sheet.getRange(2, COLUMNS.KECAMATAN, sheet.getLastRow() - 1).getValues().flat().filter(String);
-  
-  const kecamatanCounts = {};
-  kecamatanData.forEach(kec => {
-    kec = kec.trim();
-    kecamatanCounts[kec] = (kecamatanCounts[kec] || 0) + 1;
-  });
-
-  return Object.entries(kecamatanCounts)
-    .map(([kec, count]) => ({ kec, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
+  try {
+    const sheet = getSheet(SHEET_NAMES.RESPONDEN);
+    const range = sheet.getRange(2, COLUMNS.KECAMATAN, sheet.getLastRow() - 1, 1);
+    const kecamatanData = range.getValues().flat()
+      .filter(kec => kec && typeof kec === 'string' && kec.trim() && !/[-\u001F]/.test(kec));
+    if (kecamatanData.length === 0) return [{ kec: "Tidak Ada Data", count: 0 }]; // Fallback
+    const kecamatanCounts = {};
+    kecamatanData.forEach(kec => {
+      kec = kec.trim();
+      kecamatanCounts[kec] = (kecamatanCounts[kec] || 0) + 1;
+    });
+    const kecamatanArray = Object.entries(kecamatanCounts).map(([kec, count]) => ({ kec, count }))
+      .sort((a, b) => b.count - a.count);
+    return kecamatanArray.length > 0 ? kecamatanArray.slice(0, 5) : [{ kec: "Tidak Ada Data", count: 0 }]; // Top 5
+  } catch (e) {
+    Logger.log(`Error getKecamatanStats: ${e.message}`);
+    clearCacheOnError();
+    return [{ kec: "Tidak Ada Data", count: 0 }]; // Fallback
+  }
 }
-
-function getSurveyorData(surveyorName, offset = 0, limit = 10) {
-  const cacheKey = `surveyorData_v2_${surveyorName}_${offset}_${limit}`; // PERBAIKAN: Cache per page
-  let cached = scriptCache.get(cacheKey);
-  if (cached) return JSON.parse(cached);
-
-  const sheet = getSheet(SHEET_NAMES.RESPONDEN);
-  const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-  
-  // PERBAIKAN: Case-insensitive filter dan paginasi
-  const filteredData = allData.filter(row => row[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1] && row[COLUMNS.NAMA_SURVEYOR_PILIHAN - 1].toLowerCase() === surveyorName.toLowerCase());
-  const paginatedData = filteredData.slice(offset, offset + limit);
-
-  const result = {
-    stats: { total: filteredData.length, ontime: 0, late: 0 },
-    workload: {
-      surveyor: { count: 0, docs: [] }, pemetaan: { count: 0, docs: [] },
-      qc: { count: 0, docs: [] }, verifikasi: { count: 0, docs: [] },
-      finalisasi: { count: 0, docs: [] }, selesai: { count: 0, docs: [] },
-    },
-    lastUpdate: Utilities.formatDate(new Date(), TIME_ZONE, "HH:mm dd/MM/yyyy")
-  };
-  
-  filteredData.forEach(row => {
-    if (row[COLUMNS.STATUS_SURVEYOR_ONTIME_LATE - 1] === 'ONTIME') result.stats.ontime++;
-    if (row[COLUMNS.STATUS_SURVEYOR_ONTIME_LATE - 1] === 'LATE') result.stats.late++;
-  });
-  
-  paginatedData.forEach(row => {
-    const docData = {
-      nomorBerkas: typeof row[COLUMNS.NOMOR_BERKAS - 1] === 'string' && row[COLUMNS.NOMOR_BERKAS - 1].includes('/') ? row[COLUMNS.NOMOR_BERKAS - 1].split('/').slice(1).join('/') : row[COLUMNS.NOMOR_BERKAS - 1],
-      prosedur: row[COLUMNS.PROSEDUR - 1] || 'N/A',
-      desa: row[COLUMNS.DESA - 1] || 'N/A',
-      kecamatan: row[COLUMNS.KECAMATAN - 1] || 'N/A',
-      namaPemohon: row[COLUMNS.NAMA_PEMOHON - 1] || 'N/A',
-      tanggalMulai: row[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1] ? Utilities.formatDate(new Date(row[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1]), TIME_ZONE, 'dd/MM/yyyy') : '',
-      batasWaktu: row[COLUMNS.BATAS_WAKTU_SURVEYOR - 1] ? Utilities.formatDate(new Date(row[COLUMNS.BATAS_WAKTU_SURVEYOR - 1]), TIME_ZONE, 'dd/MM/yyyy') : ''
-    };
-    
-    if (row[COLUMNS.TANGGAL_SELESAI_FINAL - 1]) result.workload.selesai.docs.push(docData);
-    else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN3 - 1]) result.workload.finalisasi.docs.push(docData);
-    else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1]) result.workload.verifikasi.docs.push(docData);
-    else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN2A - 1]) result.workload.qc.docs.push(docData);
-    else if (row[COLUMNS.TANGGAL_SELESAI_ADMIN1 - 1]) result.workload.pemetaan.docs.push(docData);
-    else if (row[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1]) result.workload.surveyor.docs.push(docData);
-  });
-
-  // Hitung count dari filteredData full
-  result.workload.surveyor.count = filteredData.filter(row => row[COLUMNS.TANGGAL_MULAI_ADMIN1 - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN1 - 1]).length;
-  result.workload.pemetaan.count = filteredData.filter(row => row[COLUMNS.TANGGAL_SELESAI_ADMIN1 - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN2A - 1]).length;
-  result.workload.qc.count = filteredData.filter(row => row[COLUMNS.TANGGAL_SELESAI_ADMIN2A - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1]).length;
-  result.workload.verifikasi.count = filteredData.filter(row => row[COLUMNS.TANGGAL_SELESAI_ADMIN2B - 1] && !row[COLUMNS.TANGGAL_SELESAI_ADMIN3 - 1]).length;
-  result.workload.finalisasi.count = filteredData.filter(row => row[COLUMNS.TANGGAL_SELESAI_ADMIN3 - 1] && !row[COLUMNS.TANGGAL_SELESAI_FINAL - 1]).length;
-  result.workload.selesai.count = filteredData.filter(row => row[COLUMNS.TANGGAL_SELESAI_FINAL - 1]).length;
-
-  scriptCache.put(cacheKey, JSON.stringify(result), 3600);
-  return result;
-}
-
-
-//Loggin html
-<!DOCTYPE html>
-<html>
-<head>
-    <base target="_top">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BPN Kab. Serang - Login</title>
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    
-    <style>
-        :root { --primary: #0d47a1; --primary-dark: #09316e; }
-        body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%); height: 100vh; display: flex; justify-content: center; align-items: center; margin: 0; }
-        .login-container { background: white; border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); width: 100%; max-width: 420px; overflow: hidden; position: relative; z-index: 1; margin: 1rem; }
-        .login-header { background: var(--primary); color: white; padding: 2.5rem 2rem; text-align: center; position: relative; }
-        .login-body { padding: 2rem; }
-        .form-group { margin-bottom: 1.5rem; }
-        .form-label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: #4a5568; }
-        .form-input { width: 100%; padding: 0.75rem 1rem; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 1rem; transition: all 0.3s ease; }
-        .form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(13, 71, 161, 0.2); outline: none; }
-        .btn-login { width: 100%; padding: 0.75rem; background: var(--primary); color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.3s ease; }
-        .btn-login:hover { background: var(--primary-dark); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(13, 71, 161, 0.2); }
-        .login-footer { text-align: center; margin-top: 1.5rem; color: #718096; font-size: 0.875rem; }
-        .bg-pattern { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-image: url('https://www.bpn.go.id/assets/img/logo-bpn.png'); background-size: 40%; background-position: right bottom; background-repeat: no-repeat; opacity: 0.03; z-index: -1; }
-    </style>
-</head>
-<body>
-    <div class="login-container">
-        <div class="bg-pattern"></div>
-        <div class="login-header">
-            <a href="<?= baseUrl ?>?page=Dashboard" title="Kembali ke Dashboard" class="absolute top-4 right-4 text-white px-3 py-1 rounded-lg bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors">
-                <i class="fas fa-tachometer-alt"></i>
-            </a>
-            <h1 class="text-2xl font-bold">Sistem Monitoring Online SiMON</h1>
-            <p class="text-blue-100 mt-1">Seksi Survei dan Pemetaan Kadastral</p>
-        </div>
-        <div class="login-body">
-            <form id="loginForm">
-                <div class="form-group">
-                    <label for="email" class="form-label"><i class="fas fa-user mr-2"></i>Username</label>
-                    <input type="text" id="email" class="form-input" placeholder="Masukkan username" autocomplete="username" required>
-                </div>
-                <div class="form-group">
-                    <label for="password" class="form-label"><i class="fas fa-lock mr-2"></i>Password</label>
-                    <input type="password" id="password" class="form-input" placeholder="Masukkan password" autocomplete="current-password" required>
-                </div>
-                <button type="submit" class="btn-login"><i class="fas fa-sign-in-alt mr-2"></i>MASUK</button>
-            </form>
-            <div class="login-footer">
-                <p class="mt-1 text-xs text-gray-400">Hanya untuk penggunaan internal</p>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        document.addEventListener("DOMContentLoaded", function() {
-            if (typeof google === 'undefined' || typeof google.script === 'undefined') {
-                document.body.innerHTML = `<div style="font-family: 'Poppins', sans-serif; text-align: center; padding: 2rem; background: white; border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); max-width: 420px; margin: 2rem auto;"><h2 style="color: #d32f2f; font-size: 1.5rem;">Error Pemuatan Skrip</h2><p style="margin-top: 1rem;">Halaman ini tidak dapat dijalankan langsung. Silakan akses melalui URL web app yang sudah di-deploy.</p></div>`;
-                return;
-            }
-
-            const baseUrl = "<?= baseUrl ?>";
-
-            document.getElementById('email').focus();
-            document.getElementById("loginForm").addEventListener("submit", function(e) {
-                e.preventDefault();
-                handleLogin(baseUrl);
-            });
-        });
-        
-        function handleLogin(baseUrl) {
-            const email = document.getElementById('email').value.trim();
-            const password = document.getElementById('password').value;
-
-            if (!email || !password) {
-                Swal.fire('Error', 'Username dan Password tidak boleh kosong', 'error');
-                return;
-            }
-
-            Swal.fire({
-                title: 'Memeriksa...',
-                allowOutsideClick: false,
-                didOpen: () => { Swal.showLoading(); }
-            });
-
-            google.script.run
-                .withSuccessHandler(function(response) {
-                    Swal.close();
-                    if (response.status === 'success') {
-                        let page = '';
-                        switch (response.role) {
-                            case 'Admin 1': page = 'FormLanjutan'; break;
-                            case 'Admin 2A': page = 'FormAdmin2A'; break;
-                            case 'Admin 2B': page = 'FormAdmin2B'; break;
-                            case 'Admin 3': page = 'FormAdmin3'; break;
-                            case 'Admin 4': page = 'FormAdminFinalize'; break;
-                            case 'Surveyor': page = 'DashboardSurveyor'; break;
-                            default: page = 'Dashboard';
-                        }
-                        const newUrl = `${baseUrl}?page=${page}&name=${encodeURIComponent(response.name)}&role=${encodeURIComponent(response.role)}`;
-                        window.top.location.href = newUrl;
-                    } else {
-                        Swal.fire('Login Gagal', response.message, 'error');
-                    }
-                })
-                .withFailureHandler(function(err) {
-                    Swal.close();
-                    Swal.fire('Error', 'Terjadi kesalahan: ' + err.message, 'error');
-                })
-                .checkLogin(email, password);
-        }
-    </script>
-</body>
-</html>
-
-<!DOCTYPE html>
-<html>
-<head>
-    <base target="_top">
-    <title>Form Surveyor - Admin 1</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <style>
-        body { background: #f5f7fa; font-family: 'Poppins', sans-serif; padding: 2rem; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0;}
-        .form-box { background: #fff; max-width: 450px; width: 100%; margin: auto; border-radius: 12px; box-shadow: 0 8px 24px rgba(44,62,80,0.09); padding: 30px;}
-        label { display: block; margin-top: 1rem; font-size: 0.875rem; color: #333; font-weight: 500;}
-        input, select { width: 100%; padding: 0.75rem; border: 1px solid #d4dbe3; border-radius: 7px; font-size: 1rem; margin-top: 0.25rem; box-sizing: border-box; transition: border-color 0.2s; font-family: 'Poppins', sans-serif; }
-        input[type="file"] { padding: 0.5rem; }
-        input:focus, select:focus { border-color: #0d47a1; outline: none; box-shadow: none; }
-        button { margin-top: 0.5rem; width: 100%; padding: 0.8rem; color: white; border: none; border-radius: 7px; font-weight: bold; cursor: pointer; font-size: 1rem; transition: background-color 0.2s; font-family: 'Poppins', sans-serif;}
-        button:hover { filter: brightness(90%); }
-        button:disabled { background-color: #9e9e9e; cursor: not-allowed; filter: none; }
-        .btn-save { background-color: #0d47a1; }
-        .btn-notif-wa { background-color: #25D366; }
-        .btn-notif-email { background-color: #3b82f6; }
-        .form-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #eee; }
-        .form-title { font-size: 1.5rem; font-weight: 600; color: #0d47a1; margin: 0; }
-        .logout-btn { display: inline-block; padding: 8px 16px; border-radius: 6px; background-color: #d32f2f; color: white; text-decoration: none; font-size: 14px; font-weight: 500; transition: background-color 0.2s; white-space: nowrap; }
-        .logout-btn:hover { background-color: #b71c1c; }
-    </style>
-</head>
-<body>
-    <div class="form-box">
-        <div class="form-header">
-            <h2 class="form-title">Form Surveyor</h2>
-            <div class="flex items-center space-x-2">
-                 <a href="<?= baseUrl ?>?page=Dashboard" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-sm no-underline">Dashboard</a>
-                 <button type="button" onclick="logout()" class="logout-btn">Logout</button>
-            </div>
-        </div>
-        
-        <form id="lanjutanForm">
-            <label for="documentNumber">Nomor Dokumen</label>
-            <input id="documentNumber" name="documentNumber" class="awesomplete" placeholder="Memuat data..." required disabled>
-            
-            <label for="namaPemohon">Nama Pemohon</label>
-            <input type="text" id="namaPemohon" name="namaPemohon" disabled placeholder="Akan terisi otomatis">
-
-            <label for="surveyor">Surveyor yang Ditugaskan</label>
-            <select id="surveyor" name="surveyor" required disabled>
-                <option value="" disabled selected>Memuat data...</option>
-            </select>
-            
-            <label for="kontakPemohon">Kontak Pemohon (No. HP)</label>
-            <input type="text" id="kontakPemohon" name="kontakPemohon" placeholder="Contoh: 6281234567890" required>
-            
-            <label for="startDate">Tanggal Mulai Tugas</label>
-            <input type="date" id="startDate" name="startDate" required>
-
-            <label for="suratTugas">Upload Surat Tugas (Opsional untuk Email)</label>
-            <input type="file" id="suratTugas" name="suratTugas" accept=".pdf,.doc,.docx,.jpg,.png">
-            
-            <button type="submit" id="btnSimpan" class="btn-save">Simpan Data</button>
-            <hr class="my-4">
-            <button type="button" id="btnNotifPemohon" class="btn-notif-wa" disabled>Kirim Notif ke Pemohon (WA)</button>
-            <button type="button" id="btnNotifSurveyor" class="btn-notif-wa" disabled>Kirim Notif ke Surveyor (WA)</button>
-            <button type="button" id="btnNotifEmail" class="btn-notif-email" disabled>Kirim Notif ke Surveyor (Email)</button>
-        </form>
-    </div>
-
-    <script>
-        const baseUrl = typeof baseUrl !== 'undefined' ? "<?= baseUrl ?>" : '#';
-        const userRole = typeof userRole !== 'undefined' ? "<?= userRole ?>" : 'Publik';
-
-        function logout() {
-            Swal.fire({
-                title: 'Yakin untuk logout?', icon: 'warning', showCancelButton: true,
-                confirmButtonColor: '#0d47a1', cancelButtonColor: '#d33', confirmButtonText: 'Ya, keluar!'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    Swal.fire({ title: 'Logging out...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                    google.script.run.withSuccessHandler(url => window.top.location.href = url).logout();
-                }
-            });
-        }
-
-        document.addEventListener("DOMContentLoaded", function() {
-            if (typeof google === 'undefined' || typeof google.script === 'undefined') {
-                document.body.innerHTML = `<div class="form-box"><h2 style="color: #d32f2f;">Error Pemuatan Skrip</h2><p>Halaman ini tidak dapat dijalankan langsung.</p></div>`;
-                return;
-            }
-
-            if (userRole !== 'Admin 1') {
-                document.body.innerHTML = `<div class="form-box"><h2 class="form-title">Akses Ditolak</h2><p>Halaman ini hanya untuk Admin 1.</p><a href="${baseUrl}" style="display:block; margin-top: 1rem; padding: 13px; background-color: #0d47a1; color: white; border-radius: 7px; text-decoration:none; text-align:center;">Kembali</a></div>`;
-                return;
-            }
-
-            const form = document.getElementById('lanjutanForm');
-            const docInput = document.getElementById('documentNumber');
-            const surveyorSelect = document.getElementById('surveyor');
-            const namaPemohonInput = document.getElementById('namaPemohon');
-            const kontakPemohonInput = document.getElementById('kontakPemohon');
-            const suratTugasInput = document.getElementById('suratTugas');
-            const btnSimpan = document.getElementById('btnSimpan');
-            const btnNotifSurveyor = document.getElementById('btnNotifSurveyor');
-            const btnNotifPemohon = document.getElementById('btnNotifPemohon');
-            const btnNotifEmail = document.getElementById('btnNotifEmail');
-
-            google.script.run
-                .withSuccessHandler(options => {
-                    if (options.docNumbers[0] === 'Tidak ada data') {
-                        Swal.fire('Warning', 'Tidak ada data dokumen tersedia di Spreadsheet. Silakan periksa data RESPONDEN.', 'warning');
-                    } else {
-                        docInput.disabled = false;
-                        docInput.placeholder = "Ketik untuk mencari...";
-                        new Awesomplete(docInput, { list: options.docNumbers, minChars: 1, autoFirst: true });
-                    }
-                    surveyorSelect.disabled = false;
-                    surveyorSelect.innerHTML = '<option value="" disabled selected>Pilih Surveyor</option>';
-                    if (options?.surveyorList) {
-                        options.surveyorList.forEach(val => surveyorSelect.add(new Option(val, val)));
-                    }
-                })
-                .withFailureHandler(err => Swal.fire('Error', 'Gagal memuat data awal: ' + err.message, 'error'))
-                .getInitialFormOptions();
-
-            docInput.addEventListener("awesomplete-selectcomplete", function() {
-                google.script.run
-                    .withSuccessHandler(result => {
-                        surveyorSelect.value = result.surveyor || '';
-                        kontakPemohonInput.value = result.kontak || '';
-                        namaPemohonInput.value = result.namaPemohon || '';
-                        btnNotifSurveyor.disabled = !docInput.value;
-                        btnNotifPemohon.disabled = !docInput.value;
-                        btnNotifEmail.disabled = !docInput.value;
-                    })
-                    .withFailureHandler(err => Swal.fire('Error', 'Gagal mengambil data dokumen: ' + err.message, 'error'))
-                    .getDataByDocumentNumber(this.value);
-            });
-
-            form.addEventListener("submit", function(e) {
-                e.preventDefault();
-                btnSimpan.disabled = true;
-                btnSimpan.innerHTML = "⏳ Menyimpan...";
-                const data = {
-                    documentNumber: docInput.value, surveyor: surveyorSelect.value,
-                    kontakPemohon: kontakPemohonInput.value, startDate: document.getElementById('startDate').value
-                };
-                google.script.run
-                    .withSuccessHandler(msg => {
-                        Swal.fire('Sukses', msg, 'success');
-                        btnNotifSurveyor.disabled = false;
-                        btnNotifPemohon.disabled = false;
-                        btnNotifEmail.disabled = false;
-                    })
-                    .withFailureHandler(err => Swal.fire('Error', err.message, 'error'))
-                    .always(() => { btnSimpan.disabled = false; btnSimpan.innerHTML = "Simpan Data"; })
-                    .submitFollowUp(data);
-            });
-
-            btnNotifSurveyor.addEventListener('click', function() {
-                this.disabled = true; this.innerHTML = "⏳ Mengirim...";
-                Swal.fire({ title: 'Mempersiapkan Notifikasi...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                google.script.run
-                    .withSuccessHandler(res => {
-                        Swal.close();
-                        if (res.success) window.open(res.url, '_blank');
-                        Swal.fire(res.success ? 'Sukses' : 'Gagal', res.message, res.success ? 'success' : 'error');
-                    })
-                    .withFailureHandler(err => Swal.fire('Error', 'Gagal mengirim: ' + err.message, 'error'))
-                    .always(() => { this.disabled = false; this.innerHTML = "Kirim Notif ke Surveyor (WA)"; })
-                    .sendNotificationToSurveyor(docInput.value);
-            });
-
-            btnNotifPemohon.addEventListener('click', function() {
-                this.disabled = true; this.innerHTML = "⏳ Mengirim...";
-                Swal.fire({ title: 'Mempersiapkan Notifikasi...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                google.script.run
-                    .withSuccessHandler(res => {
-                        Swal.close();
-                        if (res.success) window.open(res.url, '_blank');
-                        Swal.fire(res.success ? 'Sukses' : 'Gagal', res.message, res.success ? 'success' : 'error');
-                    })
-                    .withFailureHandler(err => Swal.fire('Error', 'Gagal mengirim: ' + err.message, 'error'))
-                    .always(() => { this.disabled = false; this.innerHTML = "Kirim Notif ke Pemohon (WA)"; })
-                    .sendNotificationToApplicant(docInput.value);
-            });
-
-            btnNotifEmail.addEventListener('click', function() {
-                const file = suratTugasInput.files[0];
-                this.disabled = true;
-                this.innerHTML = "⏳ Memproses...";
-                Swal.fire({ title: 'Mempersiapkan Email...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const base64Data = event.target.result ? event.target.result.split(',')[1] : null;
-                    const fileName = file ? file.name : null;
-                    const contentType = file ? file.type : null;
-                    
-                    google.script.run
-                        .withSuccessHandler(res => {
-                            Swal.close();
-                            Swal.fire(res.success ? 'Sukses' : 'Gagal', res.message, res.success ? 'success' : 'error');
-                        })
-                        .withFailureHandler(err => Swal.fire('Error', 'Gagal mengirim email: ' + err.message, 'error'))
-                        .always(() => { this.disabled = false; this.innerHTML = "Kirim Notif ke Surveyor (Email)"; })
-                        .sendEmailNotificationToSurveyor(docInput.value, base64Data, fileName, contentType);
-                };
-                reader.onerror = () => Swal.fire('Error', 'Gagal membaca file.', 'error');
-                
-                if (file) {
-                    reader.readAsDataURL(file);
-                } else {
-                    reader.onload({ target: { result: null } });
-                }
-            });
-        });
-    </script>
-</body>
-</html>
-
-<!DOCTYPE html>
-<html>
-<head>
-    <base target="_top">
-    <title>Form Admin 2A - Pemetaan</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <style>
-        body { background: #f5f7fa; font-family: 'Poppins', sans-serif; padding: 2rem; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0;}
-        .form-box { background: #fff; max-width: 450px; width:100%; margin: auto; border-radius: 12px; box-shadow: 0 8px 24px rgba(44,62,80,0.09); padding: 30px;}
-        label { display: block; margin-top: 1rem; font-size: 0.875rem; color: #333; font-weight: 500;}
-        input, select, textarea { width: 100%; padding: 0.75rem; border: 1px solid #d4dbe3; border-radius: 7px; font-size: 1rem; margin-top: 0.25rem; box-sizing: border-box; transition: border-color 0.2s; font-family: 'Poppins', sans-serif;}
-        input:focus, select:focus, textarea:focus { border-color: #0d47a1; outline: none; box-shadow: none; }
-        input:disabled, select:disabled { background-color: #f1f1f1; color: #888; cursor: not-allowed; }
-        button { margin-top: 1rem; width: 100%; padding: 0.8rem; color: white; border: none; border-radius: 7px; font-weight: bold; cursor: pointer; font-size: 1rem; transition: background-color 0.2s; font-family: 'Poppins', sans-serif;}
-        .btn-main { background-color: #0d47a1; }
-        .btn-main:hover { background-color: #09316e; }
-        .btn-update { background-color: #28a745; }
-        .btn-update:hover { background-color: #218838; }
-        button:disabled { background-color: #bdbdbd; cursor: not-allowed; }
-        #msg { margin-top: 1rem; text-align: center; font-size: 0.9rem; min-height: 2rem; padding: 0.5rem; border-radius: 6px; }
-        .form-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #eee;}
-        .form-title { font-size: 1.5rem; font-weight: 600; color: #0d47a1; margin: 0;}
-        .logout-btn { display: inline-block; padding: 8px 16px; border-radius: 6px; background-color: #d32f2f; color: white; text-decoration: none; font-size: 14px; font-weight: 500; transition: background-color 0.2s; white-space: nowrap;}
-        .logout-btn:hover { background-color: #b71c1c; }
-    </style>
-</head>
-<body>
-    <div class="form-box">
-        <div class="form-header">
-            <h2 class="form-title">Form Pemetaan</h2>
-            <div class="flex items-center space-x-2">
-                <a href="<?= baseUrl ?>?page=Dashboard" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-sm no-underline">Dashboard</a>
-                <button type="button" onclick="logout()" class="logout-btn">Logout</button>
-            </div>
-        </div>
-        <div id="initial-input-section">
-            <label for="docNumberInput">Nomor Dokumen:</label>
-            <input type="text" id="docNumberInput" name="documentNumber" required autocomplete="off" class="awesomplete" placeholder="Memuat data..." disabled>
-        </div>
-        
-        <div id="form-content" style="display: none;">
-            <form id="mainForm" autocomplete="off">
-                <label for="tanggalMulai">Tanggal Mulai:</label>
-                <input type="date" name="tanggalMulai" id="tanggalMulai" required>
-                
-                <label for="mappingOfficerSelect">Mapping Officer:</label>
-                <select name="mappingOfficer" id="mappingOfficerSelect" required>
-                    <option value="">-- Pilih Officer --</option>
-                </select>
-                <button type="submit" id="btnSimpanAwal" class="btn-main">Simpan Proses Awal</button>
-            </form>
-
-            <div id="updateSection" style="display: none;">
-                <hr class="my-4">
-                <label for="tanggalSelesai">Tanggal Selesai:</label>
-                <input type="date" id="tanggalSelesai">
-                 <label for="keteranganDitunda">Alasan Ditunda:</label>
-                <textarea id="keteranganDitunda" rows="3" placeholder="Isi jika berkas ditunda..."></textarea>
-                <button type="button" id="btnUpdateStatus" class="btn-update">Update Status & Kirim Notif WA</button>
-            </div>
-        </div>
-        <div id="msg"></div>
-    </div>
-
-    <script>
-    function logout() {
-        Swal.fire({
-            title: 'Yakin untuk logout?', icon: 'warning', showCancelButton: true,
-            confirmButtonColor: '#0d47a1', cancelButtonColor: '#d33', confirmButtonText: 'Ya, keluar!'
-        }).then(res => {
-            if (res.isConfirmed) {
-                Swal.fire({ title: 'Logging out...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                google.script.run.withSuccessHandler(url => window.top.location.href = url).logout();
-            }
-        });
-    }
-
-    document.addEventListener("DOMContentLoaded", () => {
-        if (typeof google === 'undefined' || typeof google.script === 'undefined') {
-            document.body.innerHTML = `<div class="form-box"><h2 style="color: #d32f2f;">Error Pemuatan Skrip</h2><p>Halaman ini tidak dapat dijalankan langsung.</p></div>`;
-            return;
-        }
-
-        const baseUrl = typeof baseUrl !== 'undefined' ? "<?= baseUrl ?>" : '#';
-        const userRole = typeof userRole !== 'undefined' ? "<?= userRole ?>" : 'Publik';
-
-        if (userRole !== 'Admin 2A') {
-            document.body.innerHTML = `<div class="form-box"><h2 class="form-title">Akses Ditolak</h2><p>Halaman ini hanya untuk Admin 2A.</p><a href="${baseUrl}" style="display:block; margin-top: 1rem; padding: 13px; background-color: #0d47a1; color: white; border-radius: 7px; text-decoration:none; text-align:center;">Kembali</a></div>`;
-            return;
-        }
-
-        const docInput = document.getElementById('docNumberInput');
-        const formContent = document.getElementById('form-content');
-        const mainForm = document.getElementById('mainForm');
-        const tanggalMulai = document.getElementById('tanggalMulai');
-        const moSel = document.getElementById('mappingOfficerSelect');
-        const btnSimpanAwal = document.getElementById('btnSimpanAwal');
-        const updateSection = document.getElementById('updateSection');
-        const tanggalSelesai = document.getElementById('tanggalSelesai');
-        const keteranganDitunda = document.getElementById('keteranganDitunda');
-        const btnUpdateStatus = document.getElementById('btnUpdateStatus');
-        const msg = document.getElementById('msg');
-
-        google.script.run
-            .withSuccessHandler(options => {
-                if (options.docNumbers[0] === 'Tidak ada data') {
-                    Swal.fire('Warning', 'Tidak ada data dokumen tersedia di Spreadsheet. Silakan periksa data RESPONDEN.', 'warning');
-                } else {
-                    docInput.disabled = false;
-                    docInput.placeholder = "Ketik untuk mencari...";
-                    new Awesomplete(docInput, { list: options.docNumbers, minChars: 1, autoFirst: true });
-                }
-                if (options?.mappingOfficers) {
-                    options.mappingOfficers.forEach(off => moSel.add(new Option(off, off)));
-                }
-            })
-            .withFailureHandler(err => Swal.fire('Error', 'Gagal memuat data awal: ' + err.message, 'error'))
-            .getInitialFormOptions();
-
-        function handleDocSelection() {
-            const docNum = docInput.value.trim();
-            if (!docNum) return;
-            msg.innerHTML = "Memeriksa status dokumen...";
-            google.script.run
-                .withSuccessHandler(result => {
-                    msg.innerHTML = "";
-                    formContent.style.display = 'block';
-                    if (result.isProcessed) {
-                        mainForm.style.display = 'none';
-                        updateSection.style.display = 'block';
-                        msg.innerHTML = `Status saat ini: <strong>${result.status}</strong>. Silakan update status.`;
-                        msg.style.backgroundColor = '#e3f2fd';
-                        keteranganDitunda.value = result.keteranganDitunda || '';
-                    } else {
-                        mainForm.style.display = 'block';
-                        updateSection.style.display = 'none';
-                        msg.innerHTML = "Dokumen belum diproses. Silakan isi data awal.";
-                        msg.style.backgroundColor = '#e8f5e9';
-                    }
-                })
-                .withFailureHandler(err => msg.innerHTML = `Error: ${err.message}`)
-                .getAdmin2ADataByDocNum(docNum);
-        }
-
-        docInput.addEventListener('awesomplete-selectcomplete', handleDocSelection);
-        docInput.addEventListener('blur', () => { if (docInput.value) handleDocSelection(); });
-
-        mainForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            btnSimpanAwal.disabled = true;
-            btnSimpanAwal.textContent = "Menyimpan...";
-            const data = {
-                documentNumber: docInput.value,
-                tanggalMulai: tanggalMulai.value,
-                mappingOfficer: moSel.value
-            };
-            google.script.run
-                .withSuccessHandler(msgText => {
-                    Swal.fire('Sukses', msgText, 'success');
-                    handleDocSelection();
-                })
-                .withFailureHandler(err => Swal.fire('Error', err.message, 'error'))
-                .always(() => {
-                    btnSimpanAwal.disabled = false;
-                    btnSimpanAwal.textContent = "Simpan Proses Awal";
-                })
-                .submitInitialAdmin2A(data);
-        });
-
-        btnUpdateStatus.addEventListener('click', () => {
-             const newStatus = keteranganDitunda.value.trim() ? "Ditunda" : "Selesai";
-             
-             if (newStatus === 'Selesai' && !tanggalSelesai.value) {
-                Swal.fire('Peringatan', 'Tanggal Selesai wajib diisi jika tidak ditunda.', 'warning');
-                return;
-             }
-
-            btnUpdateStatus.disabled = true;
-            btnUpdateStatus.textContent = "Mengupdate...";
-            const data = {
-                documentNumber: docInput.value,
-                newStatus: newStatus,
-                tanggalSelesai: tanggalSelesai.value,
-                keteranganDitunda: keteranganDitunda.value.trim()
-            };
-            google.script.run
-                .withSuccessHandler(response => {
-                    if (response.status === 'success_with_wa' && response.url) {
-                        window.open(response.url, '_blank');
-                    }
-                    Swal.fire('Sukses', response.message, 'success');
-                    handleDocSelection();
-                })
-                .withFailureHandler(err => Swal.fire('Error', err.message, 'error'))
-                .always(() => {
-                    btnUpdateStatus.disabled = false;
-                    btnUpdateStatus.textContent = "Update Status & Kirim Notif WA";
-                })
-                .updateAdmin2AStatus(data);
-        });
-    });
-    </script>
-</body>
-</html>
-
-<!DOCTYPE html>
-<html>
-<head>
-    <base target="_top">
-    <title>Form Admin 2B - Quality Control</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <style>
-        body { background: #f5f7fa; font-family: 'Poppins', sans-serif; padding: 2rem; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0;}
-        .form-box { background: #fff; max-width: 450px; width:100%; margin: auto; border-radius: 12px; box-shadow: 0 8px 24px rgba(44,62,80,0.09); padding: 30px;}
-        label { display: block; margin-top: 1rem; font-size: 0.875rem; color: #333; font-weight: 500;}
-        input, select { width: 100%; padding: 0.75rem; border: 1px solid #d4dbe3; border-radius: 7px; font-size: 1rem; margin-top: 0.25rem; box-sizing: border-box; transition: border-color 0.2s; font-family: 'Poppins', sans-serif;}
-        input:focus, select:focus { border-color: #0d47a1; outline: none; box-shadow: none; }
-        input:disabled, select:disabled { background-color: #f1f1f1; color: #888; }
-        button { margin-top: 1rem; width: 100%; padding: 0.8rem; color: white; border: none; border-radius: 7px; font-weight: bold; cursor: pointer; font-size: 1rem; transition: background-color 0.2s; font-family: 'Poppins', sans-serif;}
-        .btn-main { background-color: #0d47a1; }
-        .btn-main:hover { background-color: #09316e; }
-        .btn-finish { background-color: #28a745; }
-        .btn-finish:hover { background-color: #218838; }
-        button:disabled { background-color: #bdbdbd; cursor: not-allowed; }
-        #msg { margin-top: 1rem; text-align: center; font-size: 0.9rem; min-height: 2rem; padding: 0.5rem; border-radius: 6px; }
-        .form-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #eee;}
-        .form-title { font-size: 1.5rem; font-weight: 600; color: #0d47a1; margin: 0;}
-        .logout-btn { display: inline-block; padding: 8px 16px; border-radius: 6px; background-color: #d32f2f; color: white; text-decoration: none; font-size: 14px; font-weight: 500; transition: background-color 0.2s; white-space: nowrap;}
-        .logout-btn:hover { background-color: #b71c1c; }
-    </style>
-</head>
-<body>
-    <div class="form-box">
-        <div class="form-header">
-            <h2 class="form-title">Form Quality Control</h2>
-            <div class="flex items-center space-x-2">
-                <a href="<?= baseUrl ?>?page=Dashboard" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-sm no-underline">Dashboard</a>
-                <button type="button" onclick="logout()" class="logout-btn">Logout</button>
-            </div>
-        </div>
-        <form id="formAdmin2B" autocomplete="off">
-            <label for="docNumberInput">Nomor Dokumen:</label>
-            <input type="text" id="docNumberInput" name="documentNumber" required autocomplete="off" class="awesomplete" placeholder="Memuat data..." disabled>
-            
-            <div id="form-content" style="display:none;">
-                <label for="statusSelect">Status QC:</label>
-                <select name="status" id="statusSelect" required>
-                    <option value="">-- Pilih Status --</option>
-                </select>
-                
-                <label for="tanggalMulai">Tanggal Mulai QC:</label>
-                <input type="date" name="tanggalMulai" id="tanggalMulai" required>
-                
-                <label for="tanggalSelesai">Tanggal Selesai QC:</label>
-                <input type="date" name="tanggalSelesai" id="tanggalSelesai" disabled>
-                
-                <button type="submit" id="btnSimpan" class="btn-main">Simpan Proses Awal QC</button>
-                <button type="button" id="btnSelesai" class="btn-finish" disabled>Tandai Selesai QC</button>
-            </div>
-        </form>
-        <div id="msg"></div>
-    </div>
-
-    <script>
-    function logout() {
-        Swal.fire({
-            title: 'Yakin untuk logout?', icon: 'warning', showCancelButton: true,
-            confirmButtonColor: '#0d47a1', cancelButtonColor: '#d33', confirmButtonText: 'Ya, keluar!'
-        }).then(res => {
-            if (res.isConfirmed) {
-                Swal.fire({ title: 'Logging out...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                google.script.run.withSuccessHandler(url => window.top.location.href = url).logout();
-            }
-        });
-    }
-
-    document.addEventListener("DOMContentLoaded", function() {
-        if (typeof google === 'undefined' || typeof google.script === 'undefined') {
-            document.body.innerHTML = `<div class="form-box"><h2 style="color: #d32f2f;">Error Pemuatan Skrip</h2><p>Halaman ini tidak dapat dijalankan langsung.</p></div>`;
-            return;
-        }
-
-        const baseUrl = typeof baseUrl !== 'undefined' ? "<?= baseUrl ?>" : '#';
-        const userRole = typeof userRole !== 'undefined' ? "<?= userRole ?>" : 'Publik';
-
-        if (userRole !== 'Admin 2B') {
-            document.body.innerHTML = `<div class="form-box"><h2 class="form-title">Akses Ditolak</h2><p>Halaman ini hanya untuk Admin 2B.</p><a href="${baseUrl}" style="display:block; margin-top: 1rem; padding: 13px; background-color: #0d47a1; color: white; border-radius: 7px; text-decoration:none; text-align:center;">Kembali</a></div>`;
-            return;
-        }
-
-        const form = document.getElementById('formAdmin2B');
-        const docInput = document.getElementById('docNumberInput');
-        const formContent = document.getElementById('form-content');
-        const statusSel = document.getElementById('statusSelect');
-        const tanggalMulai = document.getElementById('tanggalMulai');
-        const tanggalSelesai = document.getElementById('tanggalSelesai');
-        const btnSimpan = document.getElementById('btnSimpan');
-        const btnSelesai = document.getElementById('btnSelesai');
-        const msg = document.getElementById('msg');
-
-        google.script.run
-            .withSuccessHandler(formOptions => {
-                if (formOptions.docNumbers[0] === 'Tidak ada data') {
-                    Swal.fire('Warning', 'Tidak ada data dokumen tersedia di Spreadsheet. Silakan periksa data RESPONDEN.', 'warning');
-                } else {
-                    docInput.disabled = false;
-                    docInput.placeholder = "Ketik untuk mencari...";
-                    new Awesomplete(docInput, { list: formOptions.docNumbers, minChars: 1, autoFirst: true });
-                }
-                if (formOptions?.admin2B?.statusList) {
-                    formOptions.admin2B.statusList.forEach(item => statusSel.add(new Option(item.label, item.value));
-                }
-            })
-            .withFailureHandler(err => Swal.fire('Error', 'Gagal memuat data awal: ' + err.message, 'error'))
-            .getInitialFormOptions();
-        
-        function refreshFormStatus(docNum) {
-            if (!docNum) return;
-            msg.innerHTML = "Memeriksa status dokumen...";
-            google.script.run
-                .withSuccessHandler(result => {
-                    msg.innerHTML = "";
-                    formContent.style.display = 'block';
-                    
-                    if (!result.found || !result.status) {
-                        form.reset();
-                        docInput.value = docNum;
-                        [statusSel, tanggalMulai, btnSimpan].forEach(el => el.disabled = false);
-                        [tanggalSelesai, btnSelesai].forEach(el => el.disabled = true);
-                        msg.innerHTML = "Dokumen siap diproses QC. Silakan isi data awal.";
-                        msg.style.backgroundColor = '#e8f5e9';
-                    } else if (result.status === "Proses") {
-                        statusSel.value = "Proses";
-                        tanggalMulai.value = result.tanggalMulai;
-                        [statusSel, tanggalMulai, btnSimpan].forEach(el => el.disabled = true);
-                        [tanggalSelesai, btnSelesai].forEach(el => el.disabled = false);
-                        msg.innerHTML = "Dokumen sedang dalam proses QC. Silakan isi tanggal selesai.";
-                        msg.style.backgroundColor = '#e3f2fd';
-                    } else if (result.status === "Selesai") {
-                        statusSel.value = "Selesai";
-                        tanggalMulai.value = result.tanggalMulai;
-                        tanggalSelesai.value = result.tanggalSelesai;
-                        [statusSel, tanggalMulai, tanggalSelesai, btnSimpan, btnSelesai].forEach(el => el.disabled = true);
-                        msg.innerHTML = "Proses QC untuk dokumen ini sudah selesai.";
-                        msg.style.backgroundColor = '#e0e0e0';
-                    }
-                })
-                .withFailureHandler(err => Swal.fire('Error', 'Gagal memeriksa dokumen: ' + err.message, 'error'))
-                .getAdmin2B_QC_DataByDocNum(docNum);
-        }
-
-        docInput.addEventListener('awesomplete-selectcomplete', () => refreshFormStatus(docInput.value.trim()));
-        docInput.addEventListener('blur', () => { if(docInput.value) refreshFormStatus(docInput.value.trim()); });
-
-        form.addEventListener('submit', function(e){
-            e.preventDefault();
-            const data = Object.fromEntries(new FormData(this));
-            btnSimpan.disabled = true;
-            btnSimpan.textContent = "Menyimpan...";
-            google.script.run
-                .withSuccessHandler(msgText => { 
-                    Swal.fire('Sukses', msgText, 'success'); 
-                    refreshFormStatus(data.documentNumber); 
-                })
-                .withFailureHandler(err => Swal.fire('Error', err.message, 'error'))
-                .always(() => {
-                    btnSimpan.disabled = false;
-                    btnSimpan.textContent = "Simpan Proses Awal QC";
-                })
-                .submitAdmin2B_QC(data);
-        });
-
-        btnSelesai.addEventListener('click', function(){
-            if (!tanggalSelesai.value) { 
-                Swal.fire('Peringatan', 'Mohon isi Tanggal Selesai QC terlebih dahulu!', 'warning'); 
-                tanggalSelesai.focus(); 
-                return; 
-            }
-            btnSelesai.disabled = true;
-            btnSelesai.textContent = "Menyimpan...";
-            const data = { documentNumber: docInput.value, tanggalSelesai: tanggalSelesai.value };
-            google.script.run
-                .withSuccessHandler(msgText => { 
-                    Swal.fire('Sukses', msgText, 'success'); 
-                    refreshFormStatus(data.documentNumber); 
-                })
-                .withFailureHandler(err => Swal.fire('Error', err.message, 'error'))
-                .always(() => {
-                    btnSelesai.disabled = false;
-                    btnSelesai.textContent = "Tandai Selesai QC";
-                })
-                .updateAdmin2B_QC_Selesai(data);
-        });
-    });
-    </script>
-</body>
-</html>
-
-<!DOCTYPE html>
-<html>
-<head>
-    <base target="_top">
-    <title>Form Verifikasi Admin 3</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <style>
-        body { background: #f5f7fa; font-family: 'Poppins', sans-serif; padding: 1rem; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-        .form-box { background: #fff; max-width: 450px; width: 100%; margin: auto; border-radius: 12px; box-shadow: 0 8px 24px rgba(44,62,80,0.09); padding: 2rem; }
-        .form-group { margin-bottom: 1.25rem; }
-        label { display: block; margin-bottom: 0.5rem; font-size: 0.875rem; color: #333; font-weight: 500; }
-        input, select { width: 100%; padding: 0.75rem; border: 1px solid #d4dbe3; border-radius: 7px; font-size: 1rem; box-sizing: border-box; transition: border-color 0.2s; font-family: 'Poppins', sans-serif; }
-        input:focus, select:focus { border-color: #0d47a1; outline: none; box-shadow: 0 0 0 3px rgba(13, 71, 161, 0.1); }
-        button { margin-top: 0.5rem; width: 100%; padding: 0.8rem; color: white; border: none; border-radius: 7px; font-weight: bold; cursor: pointer; font-size: 1rem; transition: background-color 0.2s, transform 0.1s; font-family: 'Poppins', sans-serif; }
-        .btn-main { background-color: #0d47a1; }
-        .btn-wa { background-color: #25D366; }
-        button:disabled { background-color: #bdbdbd; cursor: not-allowed; }
-        .form-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #eee; }
-        .form-title { font-size: 1.5rem; font-weight: 600; color: #0d47a1; margin: 0; }
-        .logout-btn { display: inline-block; padding: 8px 16px; border-radius: 6px; background-color: #d32f2f; color: white; text-decoration: none; font-size: 14px; font-weight: 500; }
-        .pemohon-info { background-color: #e3f2fd; border-left: 4px solid #1e88e5; padding: 0.75rem; margin-top: 1rem; font-size: 0.9rem; border-radius: 4px; }
-    </style>
-</head>
-<body>
-    <div class="form-box">
-        <div class="form-header">
-            <h2 class="form-title">Form Verifikasi Admin 3</h2>
-            <div class="flex items-center space-x-2">
-                <a href="<?= baseUrl ?>?page=Dashboard" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-sm no-underline">Dashboard</a>
-                <button type="button" onclick="logout()" class="logout-btn">Logout</button>
-            </div>
-        </div>
-        <form id="formAdmin3" autocomplete="off">
-            <div class="form-group">
-                <label for="docNumberInput">Nomor Dokumen:</label>
-                <input type="text" id="docNumberInput" required placeholder="Memuat data..." class="awesomplete" disabled>
-            </div>
-            <div class="pemohon-info" id="pemohonInfo" style="display: none;"></div>
-            <div class="form-group">
-                <label for="statusSelect">Status Verifikasi:</label>
-                <select id="statusSelect" required disabled>
-                    <option value="">-- Pilih Status --</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="tanggalSelesaiInput">Tanggal Selesai (Submit):</label>
-                <input type="date" id="tanggalSelesaiInput" required>
-            </div>
-            <div class="form-group">
-                <label for="emailPemohon">Email Pemohon (Opsional):</label>
-                <input type="email" id="emailPemohon" placeholder="contoh@email.com">
-            </div>
-            <button type="submit" id="btnSimpan" class="btn-main">Simpan Data</button>
-            <hr class="my-4">
-            <button type="button" id="btnKirimNotif" class="btn-wa" disabled>Kirim Notif ke Pemohon</button>
-        </form>
-    </div>
-
-    <script>
-    function logout() {
-        Swal.fire({
-            title: 'Yakin untuk logout?', icon: 'warning', showCancelButton: true,
-            confirmButtonColor: '#0d47a1', cancelButtonColor: '#d33', confirmButtonText: 'Ya, keluar!'
-        }).then(res => {
-            if (res.isConfirmed) {
-                Swal.fire({ title: 'Logging out...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                google.script.run.withSuccessHandler(url => window.top.location.href = url).logout();
-            }
-        });
-    }
-
-    document.addEventListener("DOMContentLoaded", function() {
-        if (typeof google === 'undefined' || typeof google.script === 'undefined') {
-            document.body.innerHTML = `<div class="form-box"><h2 style="color: #d32f2f;">Error Pemuatan Skrip</h2><p>Halaman ini tidak dapat dijalankan langsung.</p></div>`;
-            return;
-        }
-        
-        const baseUrl = typeof baseUrl !== 'undefined' ? "<?= baseUrl ?>" : '#';
-        const userRole = typeof userRole !== 'undefined' ? "<?= userRole ?>" : 'Publik';
-
-        if (userRole !== 'Admin 3') {
-            document.body.innerHTML = `<div class="form-box"><h2 class="form-title">Akses Ditolak</h2><p>Halaman ini hanya untuk Admin 3.</p><a href="${baseUrl}" style="display:block; margin-top: 1rem; padding: 13px; background-color: #0d47a1; color: white; border-radius: 7px; text-decoration:none; text-align:center;">Kembali</a></div>`;
-            return;
-        }
-
-        const form = document.getElementById('formAdmin3');
-        const docInput = document.getElementById('docNumberInput');
-        const statusSelect = document.getElementById('statusSelect');
-        const tanggalSelesaiInput = document.getElementById('tanggalSelesaiInput');
-        const emailInput = document.getElementById('emailPemohon');
-        const pemohonInfo = document.getElementById('pemohonInfo');
-        const btnSimpan = document.getElementById('btnSimpan');
-        const btnKirimNotif = document.getElementById('btnKirimNotif');
-
-        google.script.run
-            .withSuccessHandler(formOptions => {
-                if (formOptions.docNumbers[0] === 'Tidak ada data') {
-                    Swal.fire('Warning', 'Tidak ada data dokumen tersedia di Spreadsheet. Silakan periksa data RESPONDEN.', 'warning');
-                } else {
-                    docInput.disabled = false;
-                    docInput.placeholder = "Ketik untuk mencari...";
-                    new Awesomplete(docInput, { list: formOptions.docNumbers, minChars: 1, autoFirst: true });
-                }
-                statusSelect.disabled = false;
-                if (formOptions?.admin3?.statusList) {
-                    formOptions.admin3.statusList.forEach(item => statusSelect.add(new Option(item.label, item.value)));
-                }
-            })
-            .withFailureHandler(err => Swal.fire('Error', 'Gagal memuat data awal: ' + err.message, 'error'))
-            .getInitialFormOptions();
-
-        function showPemohonInfo(docNum) {
-            if (!docNum) { pemohonInfo.style.display = 'none'; return; }
-            google.script.run
-                .withSuccessHandler(contact => {
-                    if (contact.found) {
-                        pemohonInfo.innerHTML = `<strong>Nama Pemohon:</strong> ${contact.nama}`;
-                        pemohonInfo.style.display = 'block';
-                        emailInput.value = contact.email || '';
-                    } else {
-                        pemohonInfo.style.display = 'none';
-                    }
-                })
-                .getPemohonContact(docNum);
-        }
-
-        docInput.addEventListener('awesomplete-selectcomplete', () => showPemohonInfo(docInput.value.trim()));
-        docInput.addEventListener('blur', () => { if (docInput.value) showPemohonInfo(docInput.value.trim()); });
-
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
-            if (!docInput.value || !statusSelect.value || !tanggalSelesaiInput.value) {
-                Swal.fire('Data Tidak Lengkap', 'Nomor Dokumen, Status, dan Tanggal Selesai wajib diisi.', 'warning');
-                return;
-            }
-            
-            btnSimpan.disabled = true;
-            btnSimpan.textContent = "Menyimpan...";
-            
-            const formData = {
-                documentNumber: docInput.value, status: statusSelect.value,
-                tanggalSelesai: tanggalSelesaiInput.value, emailPemohon: emailInput.value
-            };
-
-            google.script.run
-                .withSuccessHandler(response => {
-                    Swal.fire('Sukses', response.message, 'success');
-                    btnKirimNotif.disabled = false;
-                })
-                .withFailureHandler(err => Swal.fire('Error', err.message, 'error'))
-                .always(() => {
-                    btnSimpan.disabled = false;
-                    btnSimpan.textContent = "Simpan Data";
-                })
-                .saveAdmin3Data(formData);
-        });
-
-        btnKirimNotif.addEventListener('click', function() {
-            this.disabled = true;
-            this.textContent = "Memproses...";
-            Swal.fire({ title: 'Mohon Tunggu', html: 'Mempersiapkan notifikasi...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
-            google.script.run
-                .withSuccessHandler(response => {
-                    Swal.close();
-                    if (response.success && response.action === 'open_whatsapp') {
-                        window.open(response.url, '_blank');
-                        Swal.fire('Sukses', response.message, 'success');
-                    } else {
-                        Swal.fire('Gagal', response.message, 'error');
-                    }
-                })
-                .withFailureHandler(err => Swal.fire('Error', err.message, 'error'))
-                .always(() => {
-                    this.disabled = false;
-                    this.textContent = "Kirim Notif ke Pemohon";
-                })
-                .sendAdmin3Notification(docInput.value);
-        });
-    });
-    </script>
-</body>
-</html>
-
-<!DOCTYPE html>
-<html>
-<head>
-    <base target="_top">
-    <title>Form Finalisasi - Admin 4</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <style>
-        body { background: #f5f7fa; font-family: 'Poppins', sans-serif; padding: 2rem; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0;}
-        .form-box { background: #fff; max-width: 450px; width:100%; margin: auto; border-radius: 12px; box-shadow: 0 8px 24px rgba(44,62,80,0.09); padding: 30px;}
-        label { display: block; margin-top: 1rem; font-size: 0.875rem; color: #333; font-weight: 500;}
-        input, select { width: 100%; padding: 0.75rem; border: 1px solid #d4dbe3; border-radius: 7px; font-size: 1rem; margin-top: 0.25rem; box-sizing: border-box; transition: border-color 0.2s; font-family: 'Poppins', sans-serif; }
-        input:focus, select:focus { border-color: #0d47a1; outline: none; box-shadow: none; }
-        .form-group { margin-bottom: 1rem; }
-        button { margin-top: 0.5rem; width: 100%; padding: 0.8rem; color: white; border: none; border-radius: 7px; font-weight: bold; cursor: pointer; font-size: 1rem; transition: background-color 0.2s, transform 0.1s; font-family: 'Poppins', sans-serif; }
-        .btn-main { background-color: #0d47a1; }
-        .btn-wa { background-color: #25D366; }
-        button:disabled { background-color: #bdbdbd; cursor: not-allowed; }
-        .pemohon-info { background-color: #e3f2fd; border-left: 4px solid #1e88e5; padding: 0.75rem; margin-top: 1rem; font-size: 0.9rem; border-radius: 4px; }
-        .form-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #eee;}
-        .form-title { font-size: 1.5rem; font-weight: 600; color: #0d47a1; margin: 0;}
-        .logout-btn { display: inline-block; padding: 8px 16px; border-radius: 6px; background-color: #d32f2f; color: white; text-decoration: none; font-size: 14px; font-weight: 500; transition: background-color 0.2s; white-space: nowrap;}
-        .logout-btn:hover { background-color: #b71c1c; }
-    </style>
-</head>
-<body>
-    <div class="form-box">
-        <div class="form-header">
-            <h2 class="form-title">Form Finalisasi</h2>
-             <div class="flex items-center space-x-2">
-                <a href="<?= baseUrl ?>?page=Dashboard" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-sm no-underline">Dashboard</a>
-                <button type="button" onclick="logout()" class="logout-btn">Logout</button>
-            </div>
-        </div>
-        <form id="formAdminFinal" autocomplete="off">
-            <div class="form-group">
-                <label for="docNumberInput">Nomor Dokumen:</label>
-                <input type="text" id="docNumberInput" name="documentNumber" required autocomplete="off" class="awesomplete" placeholder="Memuat data..." disabled>
-            </div>
-            <div class="pemohon-info" id="pemohonInfo" style="display: none;"></div>
-            <div class="form-group">
-                <label for="statusSelect">Status Final Berkas:</label>
-                <select name="finalStatus" id="statusSelect" required disabled>
-                    <option value="">-- Pilih Status Final --</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="tanggalSelesai">Tanggal Finalisasi:</label>
-                <input type="date" id="tanggalSelesai" name="date" required>
-            </div>
-            <button type="submit" id="btnSimpan" class="btn-main">Simpan Data</button>
-            <hr class="my-4">
-            <button type="button" id="btnKirimNotif" class="btn-wa" disabled>Kirim Notif ke Pemohon</button>
-        </form>
-    </div>
-
-    <script>
-    function logout() {
-        Swal.fire({
-            title: 'Yakin untuk logout?', icon: 'warning', showCancelButton: true,
-            confirmButtonColor: '#0d47a1', cancelButtonColor: '#d33', confirmButtonText: 'Ya, keluar!'
-        }).then(res => {
-            if (res.isConfirmed) {
-                Swal.fire({ title: 'Logging out...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                google.script.run.withSuccessHandler(url => window.top.location.href = url).logout();
-            }
-        });
-    }
-
-    document.addEventListener("DOMContentLoaded", function() {
-        if (typeof google === 'undefined' || typeof google.script === 'undefined') {
-            document.body.innerHTML = `<div class="form-box"><h2 style="color: #d32f2f;">Error Pemuatan Skrip</h2><p>Halaman ini tidak dapat dijalankan langsung.</p></div>`;
-            return;
-        }
-
-        const baseUrl = typeof baseUrl !== 'undefined' ? "<?= baseUrl ?>" : '#';
-        const userRole = typeof userRole !== 'undefined' ? "<?= userRole ?>" : 'Publik';
-
-        if (userRole !== 'Admin 4') {
-            document.body.innerHTML = `<div class="form-box"><h2 class="form-title">Akses Ditolak</h2><p>Halaman ini hanya untuk Admin 4.</p><a href="${baseUrl}" style="display:block; margin-top: 1rem; padding: 13px; background-color: #0d47a1; color: white; border-radius: 7px; text-decoration:none; text-align:center;">Kembali</a></div>`;
-            return;
-        }
-
-        const form = document.getElementById('formAdminFinal');
-        const docInput = document.getElementById('docNumberInput');
-        const statusSelect = document.getElementById('statusSelect');
-        const tanggalSelesai = document.getElementById('tanggalSelesai');
-        const pemohonInfo = document.getElementById('pemohonInfo');
-        const btnSimpan = document.getElementById('btnSimpan');
-        const btnKirimNotif = document.getElementById('btnKirimNotif');
-
-        google.script.run
-            .withSuccessHandler(formOptions => {
-                if (formOptions.docNumbers[0] === 'Tidak ada data') {
-                    Swal.fire('Warning', 'Tidak ada data dokumen tersedia di Spreadsheet. Silakan periksa data RESPONDEN.', 'warning');
-                } else {
-                    docInput.disabled = false;
-                    docInput.placeholder = "Ketik untuk mencari...";
-                    new Awesomplete(docInput, { list: formOptions.docNumbers, minChars: 1, autoFirst: true });
-                }
-                statusSelect.disabled = false;
-                if (formOptions?.adminFinal?.finalStatusList) {
-                    formOptions.adminFinal.finalStatusList.forEach(item => statusSelect.add(new Option(item.label, item.value)));
-                }
-            })
-            .withFailureHandler(err => Swal.fire('Error', 'Gagal memuat data awal: ' + err.message, 'error'))
-            .getInitialFormOptions();
-
-        function showPemohonInfo(docNum) {
-            if (!docNum) { pemohonInfo.style.display = 'none'; return; }
-            google.script.run
-                .withSuccessHandler(contact => {
-                    if (contact.found) {
-                        pemohonInfo.innerHTML = `<strong>Nama Pemohon:</strong> ${contact.nama}`;
-                        pemohonInfo.style.display = 'block';
-                    } else {
-                        pemohonInfo.style.display = 'none';
-                    }
-                })
-                .getPemohonContact(docNum);
-        }
-
-        docInput.addEventListener('awesomplete-selectcomplete', () => showPemohonInfo(docInput.value.trim()));
-        docInput.addEventListener('blur', () => { if(docInput.value) showPemohonInfo(docInput.value.trim()); });
-        
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
-            if (!docInput.value || !statusSelect.value || !tanggalSelesai.value) {
-                Swal.fire('Data Tidak Lengkap', 'Nomor Dokumen, Status Final, dan Tanggal Finalisasi wajib diisi.', 'warning');
-                return;
-            }
-
-            btnSimpan.disabled = true;
-            btnSimpan.textContent = "Menyimpan...";
-            
-            const formData = {
-                documentNumber: docInput.value,
-                finalStatus: statusSelect.value,
-                date: tanggalSelesai.value
-            };
-
-            google.script.run
-                .withSuccessHandler(response => {
-                    Swal.fire('Sukses', response.message, 'success');
-                    btnKirimNotif.disabled = false;
-                })
-                .withFailureHandler(err => Swal.fire('Error', err.message, 'error'))
-                .always(() => {
-                    btnSimpan.disabled = false;
-                    btnSimpan.textContent = "Simpan Data";
-                })
-                .saveAdminFinalData(formData);
-        });
-
-        btnKirimNotif.addEventListener('click', function() {
-            this.disabled = true;
-            this.textContent = "Memproses...";
-            Swal.fire({ title: 'Mohon Tunggu', html: 'Mempersiapkan notifikasi...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
-            google.script.run
-                .withSuccessHandler(response => {
-                    Swal.close();
-                    if (response.success && response.action === 'open_whatsapp') {
-                        window.open(response.url, '_blank');
-                        Swal.fire('Sukses', response.message, 'success');
-                    } else {
-                        Swal.fire('Gagal', response.message, 'error');
-                    }
-                })
-                .withFailureHandler(err => Swal.fire('Error', err.message, 'error'))
-                .always(() => {
-                    this.disabled = false;
-                    this.textContent = "Kirim Notif ke Pemohon";
-                })
-                .sendAdminFinalNotification(docInput.value);
-        });
-    });
-    </script>
-</body>
-</html>
-
-<!DOCTYPE html>
-<html>
-<head>
-  <base target="_top">
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard Monitoring</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <style>
-    body { font-family: 'Poppins', sans-serif; background-color: #1a202c; color: #e2e8f0; }
-    .stat-card { background-color: #2d3748; border-radius: 0.75rem; transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out; border: 1px solid #4a5568; }
-    .stat-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3); }
-    .header { background-color: #2d3748; border-bottom: 1px solid #4a5568; }
-    .btn { padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; transition: background-color 0.2s; }
-    .login-btn { background-color: #4299e1; color: white; }
-    .login-btn:hover { background-color: #2b6cb0; }
-    .refresh-btn { background-color: #4a5568; color: white; }
-    .refresh-btn:hover { background-color: #718096; }
-    .progress-bar { height: 10px; border-radius: 5px; background: #4a5568; overflow: hidden; }
-    .progress-fill { height: 100%; background: #2ecc71; transition: width 0.3s; }
-  </style>
-</head>
-<body>
-  <script type="application/json" id="dashboard-data">
-    <?= JSON.stringify(dashboardData || {}) ?>
-  </script>
-
-  <header class="header p-4 shadow-md">
-    <div class="container mx-auto flex justify-between items-center">
-      <h1 class="text-2xl font-bold text-white"><i class="fas fa-tachometer-alt mr-2"></i>Dashboard Monitoring</h1>
-      <div class="flex items-center space-x-4">
-        <button id="refresh-manual-btn" class="btn refresh-btn"><i class="fas fa-sync-alt mr-2"></i>Refresh</button>
-        <div id="auth-section"></div>
-      </div>
-    </div>
-  </header>
-
-  <main class="container mx-auto p-4 sm:p-6 lg:p-8">
-    <h2 class="text-xl font-semibold mb-4 text-gray-300">Statistik Berkas</h2>
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4 mb-8">
-      <div class="stat-card p-4 flex justify-between items-center bg-blue-800 text-white"><div class="text-left"><p id="stat-total" class="text-3xl font-bold">0</p><p class="text-sm">Total Berkas Masuk</p></div><i class="fas fa-file-alt text-3xl opacity-50"></i></div>
-      <div class="stat-card p-4 flex justify-between items-center bg-yellow-600 text-white"><div class="text-left"><p id="stat-admin1" class="text-3xl font-bold">0</p><p class="text-sm">Pending Admin 1</p></div><i class="fas fa-hourglass-start text-3xl opacity-50"></i></div>
-      <div class="stat-card p-4 flex justify-between items-center bg-orange-600 text-white"><div class="text-left"><p id="stat-admin2a" class="text-3xl font-bold">0</p><p class="text-sm">Pending Admin 2A</p></div><i class="fas fa-hourglass-half text-3xl opacity-50"></i></div>
-      <div class="stat-card p-4 flex justify-between items-center bg-teal-600 text-white"><div class="text-left"><p id="stat-admin2b" class="text-3xl font-bold">0</p><p class="text-sm">Pending 2B QC</p></div><i class="fas fa-hourglass-end text-3xl opacity-50"></i></div>
-      <div class="stat-card p-4 flex justify-between items-center bg-purple-600 text-white"><div class="text-left"><p id="stat-admin3" class="text-3xl font-bold">0</p><p class="text-sm">Pending Admin 3</p></div><i class="fas fa-user-clock text-3xl opacity-50"></i></div>
-      <div class="stat-card p-4 flex justify-between items-center bg-green-600 text-white"><div class="text-left"><p id="stat-disetujui" class="text-3xl font-bold">0</p><p class="text-sm">Total Disetujui</p></div><i class="fas fa-check-circle text-3xl opacity-50"></i></div>
-      <div class="stat-card p-4 flex justify-between items-center bg-red-600 text-white"><div class="text-left"><p id="stat-dibatalkan" class="text-3xl font-bold">0</p><p class="text-sm">Total Dibatalkan</p></div><i class="fas fa-times-circle text-3xl opacity-50"></i></div>
-    </div>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-      <div class="stat-card p-5">
-        <h3 class="font-semibold mb-3 text-gray-300">Progress Keseluruhan</h3>
-        <div class="progress-bar"><div id="progressDisetujui" class="progress-fill"></div></div>
-        <p class="text-sm mt-2 text-gray-400">Persentase Disetujui: <span id="persentaseDisetujui">0%</span></p>
-      </div>
-      <div class="stat-card p-5">
-        <h3 class="font-semibold mb-3 text-gray-300">Stats per Kecamatan</h3>
-        <div style="position: relative; height: 256px;">
-          <canvas id="kecamatanChart"></canvas>
-        </div>
-      </div>
-    </div>
-    
-    <h2 class="text-xl font-semibold mt-8 mb-4 text-gray-300">Kinerja Individu (Ranking)</h2>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div class="stat-card p-5 bg-green-900/50 border-green-700"><h3 class="font-semibold mb-3 text-green-400 flex items-center"><i class="fas fa-trophy mr-2"></i>Surveyor Kinerja Terbaik</h3><div id="surveyor-ontime" class="space-y-2"></div></div>
-      <div class="stat-card p-5 bg-red-900/50 border-red-700"><h3 class="font-semibold mb-3 text-red-400 flex items-center"><i class="fas fa-exclamation-triangle mr-2"></i>Surveyor Perlu Perhatian</h3><div id="surveyor-late" class="space-y-2"></div></div>
-      <div class="stat-card p-5 bg-blue-900/50 border-blue-700"><h3 class="font-semibold mb-3 text-blue-400 flex items-center"><i class="fas fa-star mr-2"></i>Mapping Kinerja Terbaik</h3><div id="mapping-ontime" class="space-y-2"></div></div>
-    </div>
-  </main>
-
-  <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      let kecamatanChartInstance = null;
-      const isDeployed = typeof google !== 'undefined' && typeof google.script !== 'undefined';
-      const baseUrl = isDeployed ? "<?= baseUrl ?>" : '#';
-      const userRole = isDeployed ? "<?= userRole ?>" : 'Publik';
-      const userName = isDeployed ? "<?= userName ?>" : 'Tamu';
-
-      window.logout = function() { /* ... (fungsi logout tetap sama) ... */ };
-      function populateRanking(elementId, data, scoreType) { /* ... (fungsi ini tetap sama) ... */ }
-      
-      function drawKecamatanChart(kecamatanData) {
-        const canvas = document.getElementById('kecamatanChart');
-        if (!canvas || !kecamatanData) return;
-        const ctx = canvas.getContext('2d');
-
-        if (kecamatanChartInstance) { kecamatanChartInstance.destroy(); }
-
-        const labels = kecamatanData.map(item => item.kec);
-        const dataValues = kecamatanData.map(item => item.count);
-
-        kecamatanChartInstance = new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels: labels,
-            datasets: [{
-              label: 'Jumlah Berkas',
-              data: dataValues,
-              backgroundColor: [
-                'rgba(59, 130, 246, 0.7)', 'rgba(16, 185, 129, 0.7)',
-                'rgba(168, 85, 247, 0.7)', 'rgba(245, 158, 11, 0.7)',
-                'rgba(239, 68, 68, 0.7)'
-              ],
-              borderColor: '#2d3748',
-              borderWidth: 1,
-              borderRadius: 4
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                backgroundColor: '#1a202c',
-                callbacks: {
-                  label: (context) => `Total Berkas: ${context.parsed.y}`
-                }
-              }
-            },
-            scales: {
-              y: { beginAtZero: true, ticks: { color: '#9ca3af' }, grid: { color: 'rgba(255, 255, 255, 0.05)' } },
-              x: { ticks: { color: '#9ca3af' }, grid: { display: false } }
-            }
-          }
-        });
-      }
-      
-      function updateDashboardUI(data) {
-        if (!data) return;
-        if (data.stats) {
-          document.getElementById('stat-total').textContent = data.stats.totalBerkas || 0;
-          document.getElementById('stat-admin1').textContent = data.stats.pendingAdmin1 || 0;
-          document.getElementById('stat-admin2a').textContent = data.stats.pendingAdmin2A || 0;
-          document.getElementById('stat-admin2b').textContent = data.stats.pendingAdmin2B || 0;
-          document.getElementById('stat-admin3').textContent = data.stats.pendingAdmin3 || 0;
-          document.getElementById('stat-disetujui').textContent = data.stats.disetujui || 0;
-          document.getElementById('stat-dibatalkan').textContent = data.stats.dibatalkan || 0;
-
-          const total = data.stats.totalBerkas || 1;
-          const disetujuiRate = (data.stats.disetujui / total * 100).toFixed(1);
-          document.getElementById('progressDisetujui').style.width = `${disetujuiRate}%`;
-          document.getElementById('persentaseDisetujui').textContent = `${disetujuiRate}%`;
-        }
-        if (data.individualPerformance) {
-          populateRanking('surveyor-ontime', data.individualPerformance.surveyorTopOntime, 'ontime');
-          populateRanking('surveyor-late', data.individualPerformance.surveyorTopLate, 'late');
-          populateRanking('mapping-ontime', data.individualPerformance.mappingTopOntime, 'ontime');
-        }
-        if (data.kecamatanStats) {
-           drawKecamatanChart(data.kecamatanStats);
-        }
-      }
-
-      function updateAuthSection() {
-        const authSection = document.getElementById('auth-section');
-        if (userRole !== 'Publik') {
-          authSection.innerHTML = `<div class="flex items-center space-x-4"><span class="text-gray-300">Selamat datang, <strong>${userName}</strong>!</span><button type="button" onclick="logout()" class="btn login-btn"><i class="fas fa-sign-out-alt mr-1"></i> Logout</button></div>`;
-        } else {
-          authSection.innerHTML = `<a href="${baseUrl}?page=Login" class="btn login-btn"><i class="fas fa-sign-in-alt mr-1"></i> Login Admin</a>`;
-        }
-      }
-
-      function refreshDashboardData() { /* ... (fungsi ini tetap sama) ... */ }
-
-      let initialDashboardData = {};
-      try {
-        const dataString = document.getElementById('dashboard-data').textContent.trim();
-        if (dataString) { initialDashboardData = JSON.parse(dataString); }
-      } catch (e) {
-        console.error("Gagal mem-parsing data dashboard:", e);
-        Swal.fire('Error Data', 'Gagal memuat data awal dari server.', 'error');
-      }
-      
-      updateDashboardUI(initialDashboardData);
-      updateAuthSection();
-      document.getElementById('refresh-manual-btn').addEventListener('click', refreshDashboardData);
-    });
-  </script>
-</body>
-</html>
-
-
-<!DOCTYPE html>
-<html>
-<head>
-    <base target="_top">
-    <title>Dashboard Surveyor</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <style>
-        body { font-family: 'Poppins', sans-serif; background-color: #f5f7fa; padding: 2rem; }
-        .card { background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(44,62,80,0.09); padding: 1.5rem; margin-bottom: 1.5rem; }
-        .stat-box { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; }
-        .stat-item { flex: 1; min-width: 150px; text-align: center; padding: 1rem; border-radius: 8px; }
-        .stat-total { background: #e3f2fd; color: #3498db; }
-        .stat-ontime { background: #e8f5e9; color: #2ecc71; }
-        .stat-late { background: #ffebee; color: #e74c3c; }
-        .accordion-header { cursor: pointer; padding: 1rem; background: #0d47a1; color: white; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
-        .accordion-content { display: none; padding: 1rem; border: 1px solid #eee; border-top: none; border-radius: 0 0 8px 8px; }
-        .accordion-content.active { display: block; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #eee; font-size: 0.875rem;}
-        th { font-weight: 600; color: #333; }
-        .btn-back { background-color: #0d47a1; }
-        .btn-back:hover { background-color: #09316e; }
-        .pagination { display: flex; justify-content: space-between; margin-top: 1rem; }
-        @media (max-width: 640px) { .stat-box { flex-direction: column; } .stat-item { width: 100%; } table { font-size: 0.8rem; } }
-    </style>
-</head>
-<body>
-    <div class="container max-w-6xl mx-auto">
-        <div class="card">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-2xl font-bold text-[#0d47a1]"><i class="fas fa-user-tie mr-2"></i>Dashboard Surveyor</h2>
-                <div class="flex space-x-2">
-                    <a href="<?= baseUrl ?>?page=Dashboard" class="btn-back text-white px-4 py-2 rounded-lg"><i class="fas fa-tachometer-alt mr-2"></i>Kembali</a>
-                    <button onclick="logout()" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600"><i class="fas fa-sign-out-alt mr-2"></i>Logout</button>
-                </div>
-            </div>
-            <div class="mb-4">
-                <label for="surveyorInput" class="block text-sm font-medium mb-2">Pilih Surveyor:</label>
-                <input id="surveyorInput" class="awesomplete w-full p-2 border border-gray-300 rounded-lg" placeholder="Ketik nama surveyor..." list="surveyorList" />
-                <datalist id="surveyorList">
-                    <? if (typeof surveyorList !== 'undefined') { surveyorList.forEach(surveyor => { ?>
-                        <option value="<?= surveyor ?>"></option>
-                    <? }); } ?>
-                </datalist>
-                <button id="loadDataBtn" class="mt-2 bg-blue-500 text-white px-4 py-2 rounded-lg w-full hover:bg-blue-600 disabled:bg-gray-400" disabled><i class="fas fa-sync-alt mr-2"></i>Load Data</button>
-            </div>
-        </div>
-
-        <div id="dashboardContent" class="hidden">
-            <div class="card">
-                <h3 class="text-xl font-semibold mb-4 text-[#0d47a1]">Statistik Kinerja</h3>
-                <div class="stat-box">
-                    <div class="stat-item stat-total">
-                        <p class="text-3xl font-bold" id="totalTasks">0</p>
-                        <p class="text-sm">Total Tugas</p>
-                    </div>
-                    <div class="stat-item stat-ontime">
-                        <p class="text-3xl font-bold" id="ontimeTasks">0</p>
-                        <p class="text-sm">Ontime</p>
-                    </div>
-                    <div class="stat-item stat-late">
-                        <p class="text-3xl font-bold" id="lateTasks">0</p>
-                        <p class="text-sm">Late</p>
-                    </div>
-                </div>
-                <p class="text-xs text-gray-500 text-right mt-4" id="lastUpdate">Last Update: -</p>
-            </div>
-
-            <div class="card">
-                <h3 class="text-xl font-semibold mb-4 text-[#0d47a1]">Workload Breakdown</h3>
-                <div class="accordion">
-                    <div class="mb-2">
-                        <div class="accordion-header"><div><i class="fas fa-search-location mr-2"></i>Tahap Surveyor</div><span id="surveyorCount" class="bg-white text-[#0d47a1] rounded-full px-2 py-1 text-xs font-bold">0</span></div>
-                        <div class="accordion-content" id="surveyorDocs"></div>
-                        <div id="surveyorPagination" class="pagination hidden"></div>
-                    </div>
-                    <div class="mb-2">
-                        <div class="accordion-header"><div><i class="fas fa-map mr-2"></i>Tahap Pemetaan</div><span id="pemetaanCount" class="bg-white text-[#0d47a1] rounded-full px-2 py-1 text-xs font-bold">0</span></div>
-                        <div class="accordion-content" id="pemetaanDocs"></div>
-                        <div id="pemetaanPagination" class="pagination hidden"></div>
-                    </div>
-                    <div class="mb-2">
-                        <div class="accordion-header"><div><i class="fas fa-check-double mr-2"></i>Tahap QC</div><span id="qcCount" class="bg-white text-[#0d47a1] rounded-full px-2 py-1 text-xs font-bold">0</span></div>
-                        <div class="accordion-content" id="qcDocs"></div>
-                        <div id="qcPagination" class="pagination hidden"></div>
-                    </div>
-                    <div class="mb-2">
-                        <div class="accordion-header"><div><i class="fas fa-file-signature mr-2"></i>Tahap Verifikasi</div><span id="verifikasiCount" class="bg-white text-[#0d47a1] rounded-full px-2 py-1 text-xs font-bold">0</span></div>
-                        <div class="accordion-content" id="verifikasiDocs"></div>
-                        <div id="verifikasiPagination" class="pagination hidden"></div>
-                    </div>
-                    <div class="mb-2">
-                        <div class="accordion-header"><div><i class="fas fa-archive mr-2"></i>Tahap Finalisasi</div><span id="finalisasiCount" class="bg-white text-[#0d47a1] rounded-full px-2 py-1 text-xs font-bold">0</span></div>
-                        <div class="accordion-content" id="finalisasiDocs"></div>
-                        <div id="finalisasiPagination" class="pagination hidden"></div>
-                    </div>
-                    <div class="mb-2">
-                        <div class="accordion-header"><div><i class="fas fa-check-circle mr-2"></i>Selesai</div><span id="selesaiCount" class="bg-white text-[#0d47a1] rounded-full px-2 py-1 text-xs font-bold">0</span></div>
-                        <div class="accordion-content" id="selesaiDocs"></div>
-                        <div id="selesaiPagination" class="pagination hidden"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        function logout() {
-            Swal.fire({
-                title: 'Yakin untuk logout?', icon: 'warning', showCancelButton: true,
-                confirmButtonColor: '#0d47a1', cancelButtonColor: '#d33', confirmButtonText: 'Ya, keluar!'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    Swal.fire({ title: 'Logging out...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                    google.script.run.withSuccessHandler(url => window.top.location.href = url).logout();
-                }
-            });
-        }
-
-        document.addEventListener("DOMContentLoaded", () => {
-            if (typeof google === 'undefined' || typeof google.script === 'undefined') {
-                document.body.innerHTML = `<div class="card"><h2 style="color: #d32f2f;">Error Pemuatan Skrip</h2><p>Halaman ini tidak dapat dijalankan langsung.</p></div>`;
-                return;
-            }
-
-            const baseUrl = typeof baseUrl !== 'undefined' ? "<?= baseUrl ?>" : '#';
-            const userRole = typeof userRole !== 'undefined' ? "<?= userRole ?>" : 'Publik';
-            const userName = typeof userName !== 'undefined' ? "<?= userName ?>" : 'Tamu';
-
-            if (userRole !== 'Admin 1' && userRole !== 'Surveyor') {
-                document.body.innerHTML = `<div class="card"><h2 class="text-2xl font-bold text-[#0d47a1]">Akses Ditolak</h2><p>Halaman ini hanya untuk Admin 1 atau Surveyor.</p><a href="${baseUrl}" class="btn-back text-white px-4 py-2 rounded-lg mt-4 block text-center">Kembali</a></div>`;
-                return;
-            }
-
-            const input = document.getElementById('surveyorInput');
-            const loadBtn = document.getElementById('loadDataBtn');
-            const content = document.getElementById('dashboardContent');
-            let currentOffsets = { surveyor: 0, pemetaan: 0, qc: 0, verifikasi: 0, finalisasi: 0, selesai: 0 };
-            const pageLimit = 10;
-
-            new Awesomplete(input, { list: '#surveyorList', minChars: 1, autoFirst: true });
-            
-            input.addEventListener('input', () => { loadBtn.disabled = !input.value; });
-            input.addEventListener('awesomplete-selectcomplete', () => { loadBtn.disabled = false; loadBtn.click(); });
-
-            loadBtn.addEventListener('click', () => loadData(input.value));
-
-            function loadData(surveyorName) {
-                if (!surveyorName) return;
-
-                loadBtn.disabled = true;
-                loadBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Loading...';
-                Swal.fire({ title: 'Memuat Data...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                
-                google.script.run
-                    .withSuccessHandler(data => {
-                        Swal.close();
-                        updateUI(data);
-                        content.classList.remove('hidden');
-                    })
-                    .withFailureHandler(err => Swal.fire('Error', 'Gagal memuat data: ' + err.message, 'error'))
-                    .always(() => {
-                        loadBtn.disabled = false;
-                        loadBtn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i>Load Data';
-                    })
-                    .getSurveyorData(surveyorName, 0, pageLimit); // Mulai dari offset 0
-            }
-
-            function updateUI(data) {
-                document.getElementById('totalTasks').textContent = data.stats.total;
-                document.getElementById('ontimeTasks').textContent = data.stats.ontime;
-                document.getElementById('lateTasks').textContent = data.stats.late;
-                document.getElementById('lastUpdate').textContent = `Last Update: ${data.lastUpdate}`;
-
-                Object.keys(data.workload).forEach(key => {
-                    updateWorkload(key, data.workload[key]);
-                    addPagination(key, data.workload[key].count);
-                });
-            }
-
-            function updateWorkload(id, workload) {
-                document.getElementById(`${id}Count`).textContent = workload.count;
-                const container = document.getElementById(`${id}Docs`);
-                if (workload.count > 0) {
-                    let html = '<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr><th>No. Berkas</th><th>Pemohon</th><th>Prosedur</th><th>Lokasi</th><th>Tgl Mulai</th><th>Batas Waktu</th></tr></thead><tbody>';
-                    workload.docs.forEach(doc => {
-                        html += `<tr><td>${doc.nomorBerkas}</td><td>${doc.namaPemohon}</td><td>${doc.prosedur}</td><td>${doc.desa}, ${doc.kecamatan}</td><td>${doc.tanggalMulai}</td><td>${doc.batasWaktu}</td></tr>`;
-                    });
-                    html += '</tbody></table></div>';
-                    container.innerHTML = html;
-                } else {
-                    container.innerHTML = '<p class="text-gray-500 p-4 text-center">Tidak ada berkas dalam tahap ini.</p>';
-                }
-            }
-
-            function addPagination(id, total) {
-                const pagination = document.getElementById(`${id}Pagination`);
-                if (total <= pageLimit) {
-                    pagination.classList.add('hidden');
-                    return;
-                }
-                pagination.classList.remove('hidden');
-                pagination.innerHTML = `<button onclick="loadPage('${id}', ${currentOffsets[id] - pageLimit})" ${currentOffsets[id] === 0 ? 'disabled' : ''} class="bg-gray-300 px-4 py-1 rounded">Prev</button>
-                                        <button onclick="loadPage('${id}', ${currentOffsets[id] + pageLimit})" ${currentOffsets[id] + pageLimit >= total ? 'disabled' : ''} class="bg-gray-300 px-4 py-1 rounded">Next</button>`;
-            }
-
-            function loadPage(stage, offset) {
-                if (offset < 0) return;
-                const surveyorName = input.value;
-                google.script.run
-                    .withSuccessHandler(data => {
-                        currentOffsets[stage] = offset;
-                        updateWorkload(stage, data.workload[stage]);
-                        addPagination(stage, data.workload[stage].count);
-                    })
-                    .getSurveyorData(surveyorName, offset, pageLimit);
-            }
-
-            const accordionContainer = document.querySelector('.accordion');
-            accordionContainer.addEventListener('click', (event) => {
-                const header = event.target.closest('.accordion-header');
-                if (header) {
-                    const content = header.nextElementSibling;
-                    content.classList.toggle('active');
-                }
-            });
-
-            if (userRole === 'Surveyor' && userName !== 'Tamu') {
-                input.value = userName;
-                loadBtn.disabled = false;
-                loadBtn.click();
-            }
-        });
-    </script>
-</body>
-</html>
 
